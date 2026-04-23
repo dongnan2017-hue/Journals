@@ -447,9 +447,9 @@ function makeMediaUpload(kind) {
   return multer({
     storage: multer.diskStorage({
       destination: async (req, _file, cb) => {
-        const { date } = req.params;
-        if (!validDate(date)) return cb(new Error('Invalid date'));
-        const { photosDir } = entryPaths(date);
+        const { id } = req.params;
+        if (!validId(id)) return cb(new Error('Invalid entry id'));
+        const { photosDir } = entryPaths(id);
         try {
           await fs.mkdir(photosDir, { recursive: true });
           cb(null, photosDir);
