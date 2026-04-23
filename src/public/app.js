@@ -329,6 +329,76 @@
       if (source === 'user') scheduleSave();
     });
 
+    // --- Image resize on click ---
+    const imgToolbar = document.getElementById('img-size-toolbar');
+    let selectedImg = null;
+
+    function positionToolbar(img) {
+      const r = img.getBoundingClientRect();
+      imgToolbar.style.top = `${window.scrollY + r.top - 38}px`;
+      imgToolbar.style.left = `${window.scrollX + r.left}px`;
+    }
+
+    function getImgSize(img) {
+      const w = (img.style.width || '').replace('%', '');
+      return w ? Number(w) : 100;
+    }
+
+    function updateToolbarActive() {
+      if (!selectedImg) return;
+      const current = getImgSize(selectedImg);
+      imgToolbar.querySelectorAll('button').forEach(b => {
+        b.classList.toggle('active', Number(b.dataset.size) === current);
+      });
+    }
+
+    function selectImg(img) {
+      if (selectedImg && selectedImg !== img) selectedImg.classList.remove('selected-img');
+      selectedImg = img;
+      img.classList.add('selected-img');
+      positionToolbar(img);
+      imgToolbar.classList.remove('hidden');
+      updateToolbarActive();
+    }
+
+    function deselectImg() {
+      if (selectedImg) selectedImg.classList.remove('selected-img');
+      selectedImg = null;
+      imgToolbar.classList.add('hidden');
+    }
+
+    quill.root.addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG') {
+        e.stopPropagation();
+        selectImg(e.target);
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!selectedImg) return;
+      if (imgToolbar.contains(e.target)) return;
+      if (e.target === selectedImg) return;
+      deselectImg();
+    }, true);
+
+    imgToolbar.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!selectedImg) return;
+        selectedImg.style.width = `${btn.dataset.size}%`;
+        updateToolbarActive();
+        positionToolbar(selectedImg);
+        scheduleSave();
+      });
+    });
+
+    window.addEventListener('scroll', () => {
+      if (selectedImg) positionToolbar(selectedImg);
+    });
+    window.addEventListener('resize', () => {
+      if (selectedImg) positionToolbar(selectedImg);
+    });
+
     const photoInput = document.getElementById('photo-input');
     photoInput.addEventListener('change', async () => {
       const files = Array.from(photoInput.files || []);

@@ -103,7 +103,31 @@ header button:hover, header a:hover { background: #eee; }
 .ql-toolbar.ql-snow, .ql-container.ql-snow { border-color: var(--border); }
 .ql-container.ql-snow { min-height: 60vh; font: inherit; font-size: 1.05rem; }
 .ql-editor { padding: 1.5rem; }
-.ql-editor img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5rem 0; }
+.ql-editor img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5rem 0; cursor: pointer; }
+.ql-editor img.selected-img { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.img-size-toolbar {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px;
+  display: flex; gap: 2px;
+  z-index: 50;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.img-size-toolbar button {
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  min-width: 32px;
+}
+.img-size-toolbar button:hover { background: var(--bg); }
+.img-size-toolbar button.active { background: var(--accent); color: white; }
 .ql-editor iframe.ql-video, .entry-body iframe.ql-video {
   width: 100%;
   aspect-ratio: 16 / 9;
