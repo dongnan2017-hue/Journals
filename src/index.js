@@ -145,10 +145,15 @@ function entryPaths(id) {
   };
 }
 
-function newEntryId(forDate) {
-  const now = new Date();
+function newEntryId(forDate, clientTime) {
   const p = (n) => String(n).padStart(2, '0');
-  const time = `${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  let time;
+  if (typeof clientTime === 'string' && /^\d{6}$/.test(clientTime)) {
+    time = clientTime;
+  } else {
+    const now = new Date();
+    time = `${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  }
   return `${forDate}-${time}`;
 }
 
@@ -190,10 +195,9 @@ app.get('/api/entries-for-date', requireAuth, (req, res) => {
 
 app.post('/api/entries', requireWriter, async (req, res) => {
   const date = String((req.body || {}).date || '').trim();
+  const clientTime = String((req.body || {}).time || '').trim();
   if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
-  let id = newEntryId(date);
-  // If collision at same second, append a letter suffix not possible with validId regex.
-  // Loop until unique by bumping seconds artificially.
+  let id = newEntryId(date, clientTime);
   let attempts = 0;
   while (dbmod.getEntry(id) && attempts < 60) {
     const [d, t] = [id.slice(0, 10), id.slice(11)];

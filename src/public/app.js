@@ -364,12 +364,18 @@
     }
   }
 
+  function clientTimeHHmmss() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+
   async function createNewEntry() {
     if (!currentDate) return;
     const r = await fetch('/api/entries', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ date: currentDate }),
+      body: JSON.stringify({ date: currentDate, time: clientTimeHHmmss() }),
     });
     if (!r.ok) { alert('Could not create entry'); return; }
     const { id } = await r.json();
