@@ -78,6 +78,14 @@ header button:hover { background: #eee; }
 .ql-container.ql-snow { min-height: 60vh; font: inherit; font-size: 1.05rem; }
 .ql-editor { padding: 1.5rem; }
 .ql-editor img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5rem 0; }
+.ql-editor iframe.ql-video, .entry-body iframe.ql-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border: 0;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
 
 .entry {
   background: var(--card);

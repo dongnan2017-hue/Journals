@@ -43,6 +43,22 @@
     return dt.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   }
 
+  function toYouTubeEmbed(url) {
+    try {
+      const u = new URL(url.trim());
+      let id = '';
+      if (u.hostname === 'youtu.be') id = u.pathname.slice(1);
+      else if (u.hostname.endsWith('youtube.com')) {
+        if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
+        else if (u.pathname.startsWith('/embed/')) id = u.pathname.slice(7);
+        else if (u.pathname.startsWith('/shorts/')) id = u.pathname.slice(8);
+      }
+      id = id.split('/')[0].split('?')[0];
+      if (!/^[A-Za-z0-9_-]{6,}$/.test(id)) return null;
+      return `https://www.youtube.com/embed/${id}`;
+    } catch { return null; }
+  }
+
   // --- Writer ---
   let quill = null;
   let currentDate = null;
@@ -95,11 +111,20 @@
             [{ header: [1, 2, 3, false] }],
             ['bold', 'italic', 'underline', 'strike'],
             [{ list: 'ordered' }, { list: 'bullet' }],
-            ['blockquote', 'link', 'image'],
+            ['blockquote', 'link', 'image', 'video'],
             ['clean'],
           ],
           handlers: {
             image: () => document.getElementById('photo-input').click(),
+            video: () => {
+              const url = prompt('Paste a YouTube URL:');
+              if (!url) return;
+              const embedUrl = toYouTubeEmbed(url);
+              if (!embedUrl) { alert('That doesn\'t look like a YouTube URL.'); return; }
+              const range = quill.getSelection(true);
+              quill.insertEmbed(range.index, 'video', embedUrl, 'user');
+              quill.setSelection(range.index + 1);
+            },
           },
         },
       },
