@@ -76,6 +76,18 @@
   </dialog>
 
   <main id="read" class="view hidden">
+    <div id="stats-bar" class="stats-bar"></div>
+
+    <details id="calendar-wrap" class="calendar-wrap">
+      <summary>Calendar</summary>
+      <div class="calendar-header">
+        <button id="cal-prev" type="button">‹</button>
+        <span id="cal-year"></span>
+        <button id="cal-next" type="button">›</button>
+      </div>
+      <div id="calendar"></div>
+    </details>
+
     <div class="read-toolbar">
       <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">
       <button id="random-btn" title="Jump to a random entry">🎲 Random</button>

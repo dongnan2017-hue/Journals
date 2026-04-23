@@ -458,7 +458,7 @@
       const e = await fetch(`/api/entries/${date}`).then(r => r.json());
       allEntries.push({ date, html: e.html || '' });
     }
-    await loadTags();
+    await Promise.all([loadTags(), loadStats(), loadCalendar()]);
     renderEntries(allEntries);
   }
 
@@ -480,9 +480,140 @@
       body.innerHTML = html || '<p class="muted">(empty)</p>';
       article.appendChild(h);
       article.appendChild(body);
+      const comments = document.createElement('div');
+      comments.className = 'comments-section';
+      comments.dataset.date = date;
+      article.appendChild(comments);
       timeline.appendChild(article);
+      renderComments(comments, date);
     }
   }
+
+  async function renderComments(container, date) {
+    container.innerHTML = '<h3>Comments</h3>';
+    const list = await fetch(`/api/comments/${date}`).then(r => r.json()).catch(() => []);
+    for (const c of list) {
+      container.appendChild(commentEl(c, date, container));
+    }
+    container.appendChild(commentForm(date, container));
+  }
+
+  function commentEl(c, date, container) {
+    const el = document.createElement('div');
+    el.className = 'comment';
+    const when = new Date(c.created_at);
+    const meta = document.createElement('div');
+    meta.className = 'comment-meta';
+    meta.innerHTML = `<span>${c.author} · ${when.toLocaleString()}</span>`;
+    if (isWriter) {
+      const del = document.createElement('button');
+      del.className = 'comment-delete';
+      del.textContent = 'delete';
+      del.onclick = async () => {
+        if (!confirm('Delete this comment?')) return;
+        await fetch(`/api/comments/${c.id}`, { method: 'DELETE' });
+        renderComments(container, date);
+      };
+      meta.appendChild(del);
+    }
+    const body = document.createElement('div');
+    body.className = 'comment-body';
+    body.textContent = c.body;
+    el.appendChild(meta);
+    el.appendChild(body);
+    return el;
+  }
+
+  function commentForm(date, container) {
+    const form = document.createElement('form');
+    form.className = 'comment-form';
+    form.innerHTML = `<textarea placeholder="Leave a comment…" required></textarea><button type="submit">Post</button>`;
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const ta = form.querySelector('textarea');
+      const body = ta.value.trim();
+      if (!body) return;
+      const r = await fetch(`/api/comments/${date}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+      if (!r.ok) { alert('Failed to post comment'); return; }
+      ta.value = '';
+      renderComments(container, date);
+    };
+    return form;
+  }
+
+  async function loadStats() {
+    try {
+      const s = await fetch('/api/stats').then(r => r.json());
+      const bar = document.getElementById('stats-bar');
+      const firstDate = s.first ? new Date(s.first + 'T00:00') : null;
+      const days = firstDate ? Math.round((Date.now() - firstDate.getTime()) / 86400000) + 1 : 0;
+      bar.innerHTML = `
+        <div class="stat"><span class="value">${s.total}</span><span class="label">entries</span></div>
+        <div class="stat"><span class="value">${s.currentStreak}</span><span class="label">day streak</span></div>
+        <div class="stat"><span class="value">${s.longestStreak}</span><span class="label">longest streak</span></div>
+        <div class="stat"><span class="value">${days}</span><span class="label">days journaling</span></div>
+        <div class="stat"><span class="value">${s.totalComments}</span><span class="label">comments</span></div>
+      `;
+    } catch {}
+  }
+
+  let calYear = new Date().getFullYear();
+  async function loadCalendar() {
+    const yearEl = document.getElementById('cal-year');
+    const cal = document.getElementById('calendar');
+    yearEl.textContent = calYear;
+    try {
+      const data = await fetch(`/api/calendar?year=${calYear}`).then(r => r.json());
+      const filled = new Map();
+      for (const e of data.entries) filled.set(e.date, e);
+      cal.innerHTML = '';
+      const grid = document.createElement('div');
+      grid.className = 'cal-grid';
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      for (let m = 0; m < 12; m++) {
+        const month = document.createElement('div');
+        month.className = 'cal-month';
+        month.innerHTML = `<div class="cal-month-name">${monthNames[m]}</div>`;
+        const days = document.createElement('div');
+        days.className = 'cal-days';
+        const firstDay = new Date(calYear, m, 1).getDay();
+        for (let i = 0; i < firstDay; i++) {
+          const d = document.createElement('div'); d.className = 'cal-day empty-month';
+          days.appendChild(d);
+        }
+        const lastDate = new Date(calYear, m + 1, 0).getDate();
+        for (let d = 1; d <= lastDate; d++) {
+          const p = (n) => String(n).padStart(2, '0');
+          const iso = `${calYear}-${p(m + 1)}-${p(d)}`;
+          const cell = document.createElement('div');
+          cell.className = 'cal-day';
+          cell.textContent = d;
+          const hit = filled.get(iso);
+          if (hit) {
+            cell.classList.add('filled');
+            if (hit.len > 200) cell.classList.add('filled-2');
+            if (hit.len > 800) cell.classList.add('filled-3');
+            cell.title = `${iso} · ${hit.len} chars` + (hit.photo_count ? ` · ${hit.photo_count} photo${hit.photo_count>1?'s':''}` : '');
+            cell.onclick = () => {
+              const el = document.getElementById(`entry-${iso}`);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+          }
+          days.appendChild(cell);
+        }
+        month.appendChild(days);
+        grid.appendChild(month);
+      }
+      cal.appendChild(grid);
+    } catch {}
+  }
+
+  document.getElementById('cal-prev')?.addEventListener('click', () => { calYear--; loadCalendar(); });
+  document.getElementById('cal-next')?.addEventListener('click', () => { calYear++; loadCalendar(); });
 
   async function loadTags() {
     try {

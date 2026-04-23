@@ -7,6 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
+import * as dbmod from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,16 @@ try {
   console.log('[journal] Entries directory ready:', ENTRIES_DIR);
 } catch (err) {
   console.error('[journal] Failed to create entries dir', ENTRIES_DIR, err);
+  process.exit(1);
+}
+
+const DB_PATH = process.env.DB_PATH || path.join(ENTRIES_DIR, '..', 'journal.db');
+try {
+  dbmod.openDb(DB_PATH);
+  await dbmod.rebuildFromFiles(ENTRIES_DIR);
+  console.log('[journal] DB ready at', DB_PATH);
+} catch (err) {
+  console.error('[journal] Failed to initialize DB at', DB_PATH, err);
   process.exit(1);
 }
 
@@ -133,81 +144,94 @@ app.get('/api/entries', requireAuth, async (req, res) => {
   res.json(all);
 });
 
-function stripHtml(html) {
-  return html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-async function loadAllEntries() {
-  const years = (await fs.readdir(ENTRIES_DIR, { withFileTypes: true }).catch(() => []))
-    .filter(d => d.isDirectory() && /^\d{4}$/.test(d.name))
-    .map(d => d.name);
-  const entries = [];
-  for (const year of years) {
-    const files = await fs.readdir(path.join(ENTRIES_DIR, year)).catch(() => []);
-    for (const f of files) {
-      const m = f.match(/^(\d{4}-\d{2}-\d{2})\.html$/);
-      if (!m) continue;
-      const html = await fs.readFile(path.join(ENTRIES_DIR, year, f), 'utf8').catch(() => '');
-      entries.push({ date: m[1], html });
-    }
+async function writeCommentsSidecar(date) {
+  const comments = dbmod.listComments(date);
+  const { dir } = entryPaths(date);
+  const sidecar = path.join(dir, `${date}.comments.json`);
+  if (!comments.length) {
+    await fs.unlink(sidecar).catch(() => {});
+    return;
   }
-  return entries;
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(sidecar, JSON.stringify(comments, null, 2), 'utf8');
 }
 
-app.get('/api/search', requireAuth, async (req, res) => {
-  const q = String(req.query.q || '').trim().toLowerCase();
+app.get('/api/search', requireAuth, (req, res) => {
+  const q = String(req.query.q || '').trim();
   if (!q) return res.json([]);
-  const entries = await loadAllEntries();
-  const matches = [];
-  for (const { date, html } of entries) {
-    const text = stripHtml(html).toLowerCase();
-    const i = text.indexOf(q);
-    if (i === -1) continue;
-    const start = Math.max(0, i - 40);
-    const snippet = (start > 0 ? '…' : '') + text.slice(start, i + q.length + 80) + '…';
-    matches.push({ date, snippet });
-  }
-  matches.sort((a, b) => b.date.localeCompare(a.date));
-  res.json(matches);
+  res.json(dbmod.searchEntries(q));
 });
 
-app.get('/api/on-this-day', requireAuth, async (req, res) => {
+app.get('/api/on-this-day', requireAuth, (req, res) => {
   const ref = String(req.query.ref || '').trim();
   if (!validDate(ref)) return res.status(400).json({ error: 'Invalid ref date' });
-  const monthDay = ref.slice(5);
-  const entries = await loadAllEntries();
-  const hits = entries
-    .filter(e => e.date.slice(5) === monthDay && e.date !== ref && e.date < ref)
-    .sort((a, b) => b.date.localeCompare(a.date));
-  res.json(hits);
+  res.json(dbmod.onThisDay(ref));
 });
 
-app.get('/api/random', requireAuth, async (req, res) => {
-  const entries = await loadAllEntries();
-  if (!entries.length) return res.json(null);
-  const pick = entries[Math.floor(Math.random() * entries.length)];
-  res.json(pick);
+app.get('/api/random', requireAuth, (req, res) => {
+  const all = dbmod.getDb().prepare(
+    'SELECT date, html FROM entries WHERE length(plain) > 0'
+  ).all();
+  if (!all.length) return res.json(null);
+  res.json(all[Math.floor(Math.random() * all.length)]);
 });
 
-app.get('/api/tags', requireAuth, async (req, res) => {
-  const entries = await loadAllEntries();
+app.get('/api/tags', requireAuth, (req, res) => {
+  const rows = dbmod.getDb().prepare(
+    "SELECT date, plain FROM entries WHERE plain LIKE '%#%'"
+  ).all();
   const tagCounts = new Map();
-  for (const { date, html } of entries) {
-    const text = stripHtml(html);
-    const tags = text.match(/#[A-Za-z0-9_]+/g) || [];
+  for (const { date, plain } of rows) {
+    const tags = plain.match(/#[A-Za-z0-9_]+/g) || [];
     for (const t of new Set(tags.map(t => t.toLowerCase()))) {
       if (!tagCounts.has(t)) tagCounts.set(t, []);
       tagCounts.get(t).push(date);
     }
   }
-  const result = [...tagCounts.entries()]
+  res.json([...tagCounts.entries()]
     .map(([tag, dates]) => ({ tag, count: dates.length, dates }))
-    .sort((a, b) => b.count - a.count);
-  res.json(result);
+    .sort((a, b) => b.count - a.count));
+});
+
+app.get('/api/calendar', requireAuth, (req, res) => {
+  const year = Number(req.query.year) || new Date().getUTCFullYear();
+  res.json({ year, entries: dbmod.calendar(year) });
+});
+
+app.get('/api/stats', requireAuth, (req, res) => {
+  res.json(dbmod.stats());
+});
+
+app.get('/api/comments/:date', requireAuth, (req, res) => {
+  const { date } = req.params;
+  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+  res.json(dbmod.listComments(date));
+});
+
+app.post('/api/comments/:date', requireAuth, async (req, res) => {
+  const { date } = req.params;
+  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+  const body = String((req.body || {}).body || '').trim();
+  if (!body) return res.status(400).json({ error: 'Body required' });
+  if (body.length > 4000) return res.status(400).json({ error: 'Body too long' });
+  const c = dbmod.addComment({ entryDate: date, author: req.session.role, body });
+  await writeCommentsSidecar(date);
+  res.json(c);
+});
+
+app.delete('/api/comments/:id', requireWriter, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+  const row = dbmod.getDb().prepare('SELECT entry_date FROM comments WHERE id = ?').get(id);
+  dbmod.deleteComment(id);
+  if (row) await writeCommentsSidecar(row.entry_date);
+  res.json({ ok: true });
 });
 
 app.get('/print', requireAuth, async (_req, res) => {
-  const entries = (await loadAllEntries()).sort((a, b) => a.date.localeCompare(b.date));
+  const entries = dbmod.getDb()
+    .prepare('SELECT date, html FROM entries ORDER BY date')
+    .all();
   const body = entries.map(e => {
     const d = new Date(e.date + 'T00:00');
     const formatted = d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -241,10 +265,13 @@ app.put('/api/entries/:date', requireWriter, async (req, res) => {
   if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
   const { html } = req.body || {};
   if (typeof html !== 'string') return res.status(400).json({ error: 'html required' });
-  const { dir, htmlFile } = entryPaths(date);
+  const { dir, htmlFile, photosDir } = entryPaths(date);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(htmlFile, html, 'utf8');
-  res.json({ ok: true, updatedAt: new Date().toISOString() });
+  const updatedAt = new Date().toISOString();
+  const photos = await fs.readdir(photosDir).catch(() => []);
+  dbmod.indexEntry({ date, html, updatedAt, photoCount: photos.length });
+  res.json({ ok: true, updatedAt });
 });
 
 const upload = multer({
@@ -271,9 +298,23 @@ const upload = multer({
   },
 });
 
-app.post('/api/entries/:date/photos', requireWriter, upload.array('photo', 20), (req, res) => {
+async function refreshPhotoCount(date) {
+  const { photosDir, htmlFile } = entryPaths(date);
+  const photos = await fs.readdir(photosDir).catch(() => []);
+  const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
+  const stat = await fs.stat(htmlFile).catch(() => ({ mtime: new Date() }));
+  dbmod.indexEntry({
+    date,
+    html,
+    updatedAt: stat.mtime.toISOString(),
+    photoCount: photos.length,
+  });
+}
+
+app.post('/api/entries/:date/photos', requireWriter, upload.array('photo', 20), async (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No file' });
+  await refreshPhotoCount(req.params.date);
   res.json({
     files: files.map(f => ({
       filename: f.filename,
@@ -287,6 +328,7 @@ app.delete('/api/entries/:date/photos/:filename', requireWriter, async (req, res
   if (!validDate(date) || !safeFilename(filename)) return res.status(400).json({ error: 'Invalid' });
   const { photosDir } = entryPaths(date);
   await fs.unlink(path.join(photosDir, filename)).catch(() => {});
+  await refreshPhotoCount(date);
   res.json({ ok: true });
 });
 

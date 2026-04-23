@@ -152,6 +152,66 @@ header button:hover, header a:hover { background: #eee; }
   border-radius: 4px;
 }
 
+.stats-bar {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.stats-bar .stat { display: flex; flex-direction: column; min-width: 80px; }
+.stats-bar .stat .value { font-size: 1.3rem; color: var(--accent); font-weight: bold; }
+.stats-bar .stat .label { color: var(--muted); font-size: 0.8rem; }
+
+.calendar-wrap {
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.75rem 1rem; margin-bottom: 1rem;
+}
+.calendar-wrap summary { cursor: pointer; color: var(--accent); font-weight: bold; user-select: none; }
+.calendar-header { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0; }
+.calendar-header button { padding: 0.25rem 0.75rem; font: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.calendar-header #cal-year { font-size: 1.1rem; font-weight: bold; min-width: 4rem; text-align: center; }
+.cal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
+.cal-month { }
+.cal-month-name { font-size: 0.85rem; color: var(--muted); text-align: center; margin-bottom: 0.25rem; }
+.cal-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-day {
+  aspect-ratio: 1; border-radius: 2px; background: #efece3;
+  font-size: 0.7rem; color: var(--muted);
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+}
+.cal-day.filled { background: #c8a574; color: white; cursor: pointer; }
+.cal-day.filled.filled-2 { background: #a8875b; }
+.cal-day.filled.filled-3 { background: var(--accent); }
+.cal-day.empty-month { visibility: hidden; }
+.cal-day.filled:hover { outline: 2px solid var(--accent); }
+
+.comments-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--border); }
+.comments-section h3 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.comment {
+  background: var(--bg); border-radius: 4px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+.comment-meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem; display: flex; justify-content: space-between; }
+.comment-body { white-space: pre-wrap; }
+.comment-delete {
+  background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.75rem;
+}
+.comment-delete:hover { color: #b00020; }
+.comment-form { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.comment-form textarea {
+  flex: 1; font: inherit; font-size: 0.9rem; padding: 0.5rem;
+  border: 1px solid var(--border); border-radius: 4px; resize: vertical;
+  min-height: 2.5rem; max-height: 10rem;
+}
+.comment-form button {
+  font: inherit; padding: 0 1rem; background: var(--accent); color: white;
+  border: 0; border-radius: 4px; cursor: pointer; align-self: stretch;
+}
+
 .entry {
   background: var(--card);
   border: 1px solid var(--border);
