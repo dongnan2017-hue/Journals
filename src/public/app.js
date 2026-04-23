@@ -64,6 +64,32 @@
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   }
 
+  async function resizeImage(file, maxDim = 2048, quality = 0.85) {
+    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type)) return file;
+    if (file.size < 800 * 1024) return file;
+    try {
+      const url = URL.createObjectURL(file);
+      const img = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = url;
+      });
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+      URL.revokeObjectURL(url);
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch { return file; }
+  }
+
   // --- Writer ---
   let quill = null;
   let currentDate = null;
@@ -181,9 +207,11 @@
       const files = Array.from(photoInput.files || []);
       photoInput.value = '';
       if (!files.length || !currentDate) return;
+      setStatus(`Preparing ${files.length} photo${files.length > 1 ? 's' : ''}…`);
+      const resized = await Promise.all(files.map(f => resizeImage(f)));
       setStatus(`Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`);
       const fd = new FormData();
-      for (const f of files) fd.append('photo', f);
+      for (const f of resized) fd.append('photo', f);
       const r = await fetch(`/api/entries/${currentDate}/photos`, { method: 'POST', body: fd });
       if (!r.ok) { setStatus('Upload failed'); return; }
       const { files: uploaded } = await r.json();
