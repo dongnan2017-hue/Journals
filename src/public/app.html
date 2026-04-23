@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Journal</title>
+  <meta name="theme-color" content="#8b6f47">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -15,6 +19,7 @@
     </nav>
     <div class="spacer"></div>
     <span id="role-label" class="muted"></span>
+    <a id="print-btn" href="/print" target="_blank" title="Export entries as PDF">Print</a>
     <button id="backup-btn" title="Download a zip backup">Backup</button>
     <button id="logout">Log out</button>
   </header>
@@ -26,17 +31,35 @@
       </label>
       <span id="save-status" class="muted"></span>
     </div>
+
+    <section id="on-this-day" class="otd hidden">
+      <h3>On this day</h3>
+      <div id="otd-list"></div>
+    </section>
+
     <div id="editor-container">
       <div id="editor"></div>
     </div>
-    <input type="file" id="photo-input" accept="image/*" hidden>
+    <input type="file" id="photo-input" accept="image/*" multiple hidden>
   </main>
 
   <main id="read" class="view hidden">
+    <div class="read-toolbar">
+      <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">
+      <button id="random-btn" title="Jump to a random entry">🎲 Random</button>
+      <select id="tag-filter" title="Filter by tag">
+        <option value="">All tags</option>
+      </select>
+    </div>
     <div id="timeline"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
   <script src="/static/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>

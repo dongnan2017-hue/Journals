@@ -3,15 +3,15 @@
   if (!me.role) { location.href = '/login'; return; }
   const isWriter = me.role === 'writer';
 
-  const roleLabel = document.getElementById('role-label');
-  roleLabel.textContent = isWriter ? 'Writing' : 'Reading';
+  document.getElementById('role-label').textContent = isWriter ? 'Writing' : 'Reading';
 
   const writeTab = document.querySelector('[data-view="write"]');
-  const readTab = document.querySelector('[data-view="read"]');
   const backupBtn = document.getElementById('backup-btn');
+  const printBtn = document.getElementById('print-btn');
   if (!isWriter) {
     writeTab.style.display = 'none';
     backupBtn.style.display = 'none';
+    printBtn.style.display = 'none';
   }
 
   function showView(name) {
@@ -59,6 +59,11 @@
     } catch { return null; }
   }
 
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
   // --- Writer ---
   let quill = null;
   let currentDate = null;
@@ -71,6 +76,7 @@
     const e = await fetch(`/api/entries/${date}`).then(r => r.json());
     lastSaved = e.html || '';
     quill.root.innerHTML = lastSaved || '<p><br></p>';
+    loadOnThisDay(date);
   }
 
   function setStatus(text) {
@@ -94,6 +100,42 @@
     });
     if (r.ok) { lastSaved = html; setStatus('Saved'); }
     else { setStatus('Save failed — try again'); }
+  }
+
+  async function loadOnThisDay(date) {
+    const wrap = document.getElementById('on-this-day');
+    const list = document.getElementById('otd-list');
+    list.innerHTML = '';
+    try {
+      const hits = await fetch(`/api/on-this-day?ref=${date}`).then(r => r.json());
+      if (!hits.length) { wrap.classList.add('hidden'); return; }
+      wrap.classList.remove('hidden');
+      for (const { date: d, html } of hits) {
+        const yearsAgo = Number(date.slice(0, 4)) - Number(d.slice(0, 4));
+        const card = document.createElement('div');
+        card.className = 'otd-card';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        const text = (tmp.textContent || '').slice(0, 180).trim();
+        card.innerHTML = `
+          <div class="otd-date">${formatDate(d)} · ${yearsAgo} year${yearsAgo === 1 ? '' : 's'} ago</div>
+          <div class="otd-snippet"></div>
+          <div class="otd-full ql-editor hidden"></div>
+          <button class="link-btn otd-toggle">Read full entry</button>
+        `;
+        card.querySelector('.otd-snippet').textContent = text + (text.length >= 180 ? '…' : '');
+        card.querySelector('.otd-full').innerHTML = html;
+        const toggle = card.querySelector('.otd-toggle');
+        toggle.addEventListener('click', () => {
+          const full = card.querySelector('.otd-full');
+          const snippet = card.querySelector('.otd-snippet');
+          const open = full.classList.toggle('hidden') === false;
+          snippet.classList.toggle('hidden', open);
+          toggle.textContent = open ? 'Collapse' : 'Read full entry';
+        });
+        list.appendChild(card);
+      }
+    } catch { wrap.classList.add('hidden'); }
   }
 
   if (isWriter) {
@@ -136,21 +178,27 @@
 
     const photoInput = document.getElementById('photo-input');
     photoInput.addEventListener('change', async () => {
-      const file = photoInput.files[0];
+      const files = Array.from(photoInput.files || []);
       photoInput.value = '';
-      if (!file || !currentDate) return;
-      setStatus('Uploading photo…');
+      if (!files.length || !currentDate) return;
+      setStatus(`Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`);
       const fd = new FormData();
-      fd.append('photo', file);
+      for (const f of files) fd.append('photo', f);
       const r = await fetch(`/api/entries/${currentDate}/photos`, { method: 'POST', body: fd });
       if (!r.ok) { setStatus('Upload failed'); return; }
-      const { url } = await r.json();
-      const range = quill.getSelection(true);
-      quill.insertEmbed(range.index, 'image', url, 'user');
-      quill.setSelection(range.index + 1);
+      const { files: uploaded } = await r.json();
+      const range = quill.getSelection(true) || { index: quill.getLength() };
+      if (uploaded.length === 1) {
+        quill.insertEmbed(range.index, 'image', uploaded[0].url, 'user');
+        quill.setSelection(range.index + 1);
+      } else {
+        const html = `<div class="gallery">${uploaded.map(u => `<img src="${u.url}">`).join('')}</div><p></p>`;
+        quill.clipboard.dangerouslyPasteHTML(range.index, html, 'user');
+      }
+      setStatus('Saving…');
+      scheduleSave();
     });
 
-    // Save on blur and before leaving page
     window.addEventListener('beforeunload', () => {
       if (quill && currentDate && quill.root.innerHTML !== lastSaved) {
         navigator.sendBeacon(
@@ -167,27 +215,89 @@
   }
 
   // --- Reader ---
+  let allEntries = [];
+
   async function loadTimeline() {
     const timeline = document.getElementById('timeline');
     timeline.innerHTML = '<p class="muted">Loading…</p>';
-    const entries = await fetch('/api/entries').then(r => r.json());
+    const list = await fetch('/api/entries').then(r => r.json());
+    allEntries = [];
+    for (const { date } of list) {
+      const e = await fetch(`/api/entries/${date}`).then(r => r.json());
+      allEntries.push({ date, html: e.html || '' });
+    }
+    await loadTags();
+    renderEntries(allEntries);
+  }
+
+  function renderEntries(entries) {
+    const timeline = document.getElementById('timeline');
     if (!entries.length) {
       timeline.innerHTML = '<p class="muted">No entries yet.</p>';
       return;
     }
     timeline.innerHTML = '';
-    for (const { date } of entries) {
-      const e = await fetch(`/api/entries/${date}`).then(r => r.json());
+    for (const { date, html } of entries) {
       const article = document.createElement('article');
       article.className = 'entry';
+      article.id = `entry-${date}`;
       const h = document.createElement('h2');
       h.textContent = formatDate(date);
       const body = document.createElement('div');
       body.className = 'entry-body ql-editor';
-      body.innerHTML = e.html || '<p class="muted">(empty)</p>';
+      body.innerHTML = html || '<p class="muted">(empty)</p>';
       article.appendChild(h);
       article.appendChild(body);
       timeline.appendChild(article);
     }
   }
+
+  async function loadTags() {
+    try {
+      const tags = await fetch('/api/tags').then(r => r.json());
+      const sel = document.getElementById('tag-filter');
+      sel.innerHTML = '<option value="">All tags</option>';
+      for (const { tag, count } of tags) {
+        const opt = document.createElement('option');
+        opt.value = tag;
+        opt.textContent = `${tag} (${count})`;
+        sel.appendChild(opt);
+      }
+    } catch {}
+  }
+
+  const searchInput = document.getElementById('search');
+  const tagFilter = document.getElementById('tag-filter');
+  const randomBtn = document.getElementById('random-btn');
+
+  searchInput?.addEventListener('input', debounce(async () => {
+    const q = searchInput.value.trim();
+    if (!q) { renderEntries(allEntries); return; }
+    const results = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+    const dates = new Set(results.map(r => r.date));
+    renderEntries(allEntries.filter(e => dates.has(e.date)));
+  }, 250));
+
+  tagFilter?.addEventListener('change', () => {
+    const tag = tagFilter.value.toLowerCase();
+    if (!tag) { renderEntries(allEntries); return; }
+    const filtered = allEntries.filter(e => {
+      const text = (new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '').toLowerCase();
+      return text.includes(tag);
+    });
+    renderEntries(filtered);
+  });
+
+  randomBtn?.addEventListener('click', async () => {
+    const pick = await fetch('/api/random').then(r => r.json());
+    if (!pick) { alert('No entries yet.'); return; }
+    if (!allEntries.length) await loadTimeline();
+    const el = document.getElementById(`entry-${pick.date}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.style.transition = 'background 1s';
+      el.style.background = '#fff6e0';
+      setTimeout(() => { el.style.background = ''; }, 1500);
+    }
+  });
 })();

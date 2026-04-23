@@ -133,6 +133,100 @@ app.get('/api/entries', requireAuth, async (req, res) => {
   res.json(all);
 });
 
+function stripHtml(html) {
+  return html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function loadAllEntries() {
+  const years = (await fs.readdir(ENTRIES_DIR, { withFileTypes: true }).catch(() => []))
+    .filter(d => d.isDirectory() && /^\d{4}$/.test(d.name))
+    .map(d => d.name);
+  const entries = [];
+  for (const year of years) {
+    const files = await fs.readdir(path.join(ENTRIES_DIR, year)).catch(() => []);
+    for (const f of files) {
+      const m = f.match(/^(\d{4}-\d{2}-\d{2})\.html$/);
+      if (!m) continue;
+      const html = await fs.readFile(path.join(ENTRIES_DIR, year, f), 'utf8').catch(() => '');
+      entries.push({ date: m[1], html });
+    }
+  }
+  return entries;
+}
+
+app.get('/api/search', requireAuth, async (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (!q) return res.json([]);
+  const entries = await loadAllEntries();
+  const matches = [];
+  for (const { date, html } of entries) {
+    const text = stripHtml(html).toLowerCase();
+    const i = text.indexOf(q);
+    if (i === -1) continue;
+    const start = Math.max(0, i - 40);
+    const snippet = (start > 0 ? '…' : '') + text.slice(start, i + q.length + 80) + '…';
+    matches.push({ date, snippet });
+  }
+  matches.sort((a, b) => b.date.localeCompare(a.date));
+  res.json(matches);
+});
+
+app.get('/api/on-this-day', requireAuth, async (req, res) => {
+  const ref = String(req.query.ref || '').trim();
+  if (!validDate(ref)) return res.status(400).json({ error: 'Invalid ref date' });
+  const monthDay = ref.slice(5);
+  const entries = await loadAllEntries();
+  const hits = entries
+    .filter(e => e.date.slice(5) === monthDay && e.date !== ref && e.date < ref)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  res.json(hits);
+});
+
+app.get('/api/random', requireAuth, async (req, res) => {
+  const entries = await loadAllEntries();
+  if (!entries.length) return res.json(null);
+  const pick = entries[Math.floor(Math.random() * entries.length)];
+  res.json(pick);
+});
+
+app.get('/api/tags', requireAuth, async (req, res) => {
+  const entries = await loadAllEntries();
+  const tagCounts = new Map();
+  for (const { date, html } of entries) {
+    const text = stripHtml(html);
+    const tags = text.match(/#[A-Za-z0-9_]+/g) || [];
+    for (const t of new Set(tags.map(t => t.toLowerCase()))) {
+      if (!tagCounts.has(t)) tagCounts.set(t, []);
+      tagCounts.get(t).push(date);
+    }
+  }
+  const result = [...tagCounts.entries()]
+    .map(([tag, dates]) => ({ tag, count: dates.length, dates }))
+    .sort((a, b) => b.count - a.count);
+  res.json(result);
+});
+
+app.get('/print', requireAuth, async (_req, res) => {
+  const entries = (await loadAllEntries()).sort((a, b) => a.date.localeCompare(b.date));
+  const body = entries.map(e => {
+    const d = new Date(e.date + 'T00:00');
+    const formatted = d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    return `<article><h2>${formatted}</h2><div class="body ql-editor">${e.html || '<p><em>(empty)</em></p>'}</div></article>`;
+  }).join('\n');
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Journal — Print</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
+<style>
+  body { font: 12pt/1.5 Georgia, serif; max-width: 7in; margin: 0.5in auto; color: #222; }
+  article { page-break-inside: avoid; margin-bottom: 2rem; }
+  article + article { border-top: 1px solid #ccc; padding-top: 1.5rem; }
+  h2 { color: #8b6f47; font-size: 1.1rem; margin: 0 0 0.5rem; }
+  img, iframe { max-width: 100%; page-break-inside: avoid; }
+  .print-btn { position: fixed; top: 1rem; right: 1rem; padding: 0.5rem 1rem; background: #8b6f47; color: white; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
+  @media print { .print-btn { display: none; } body { margin: 0; } }
+</style></head>
+<body><button class="print-btn" onclick="window.print()">Print / Save as PDF</button>${body}</body></html>`);
+});
+
 app.get('/api/entries/:date', requireAuth, async (req, res) => {
   const { date } = req.params;
   if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
@@ -177,11 +271,14 @@ const upload = multer({
   },
 });
 
-app.post('/api/entries/:date/photos', requireWriter, upload.single('photo'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file' });
+app.post('/api/entries/:date/photos', requireWriter, upload.array('photo', 20), (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'No file' });
   res.json({
-    filename: req.file.filename,
-    url: `/photos/${req.params.date}/${req.file.filename}`,
+    files: files.map(f => ({
+      filename: f.filename,
+      url: `/photos/${req.params.date}/${f.filename}`,
+    })),
   });
 });
 

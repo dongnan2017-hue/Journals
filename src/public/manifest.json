@@ -1,0 +1,12 @@
+{
+  "name": "Journal",
+  "short_name": "Journal",
+  "description": "A daily journal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafaf7",
+  "theme_color": "#8b6f47",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
