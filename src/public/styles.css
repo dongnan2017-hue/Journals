@@ -284,12 +284,23 @@ header button:hover, header a:hover { background: #eee; }
   padding: 1.5rem 2rem;
   margin-bottom: 1.5rem;
 }
-.entry h2 {
+.entry-header {
+  display: flex; align-items: center; gap: 0.75rem;
   margin: 0 0 1rem;
-  font-size: 1.2rem;
-  color: var(--accent);
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.5rem;
+}
+.entry-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--accent);
+  flex: 1;
+}
+.entry-header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.entry h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--accent);
 }
 .entry-body img { max-width: 100%; height: auto; border-radius: 4px; }
 

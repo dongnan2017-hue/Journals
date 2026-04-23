@@ -680,19 +680,46 @@
     timeline.innerHTML = '';
     // Oldest-first reads more naturally for reader; keep newest-first for writer
     const ordered = isWriter ? entries : [...entries].reverse();
-    for (const { id, date, html, wordCount } of ordered) {
+    for (const { id, date, html, wordCount, published } of ordered) {
       const article = document.createElement('article');
       article.className = 'entry';
       article.id = `entry-${id}`;
+      const header = document.createElement('div');
+      header.className = 'entry-header';
       const h = document.createElement('h2');
       h.textContent = `${formatDate(date)} — ${formatEntryTime(id)}`;
+      header.appendChild(h);
+      if (isWriter) {
+        const actions = document.createElement('div');
+        actions.className = 'entry-header-actions';
+        if (published === false) {
+          const draftTag = document.createElement('span');
+          draftTag.className = 'draft-badge';
+          draftTag.textContent = 'Draft';
+          actions.appendChild(draftTag);
+        }
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'link-btn';
+        editBtn.textContent = 'Edit';
+        editBtn.onclick = async () => {
+          const picker = document.getElementById('date-picker');
+          picker.value = date;
+          await selectDate(date);
+          await loadEntry(id);
+          showView('write');
+          window.scrollTo({ top: 0 });
+        };
+        actions.appendChild(editBtn);
+        header.appendChild(actions);
+      }
       const wc = document.createElement('div');
       wc.className = 'entry-wc muted';
       wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}`;
       const body = document.createElement('div');
       body.className = 'entry-body ql-editor';
       body.innerHTML = html || '<p class="muted">(empty)</p>';
-      article.appendChild(h);
+      article.appendChild(header);
       article.appendChild(wc);
       article.appendChild(body);
       const comments = document.createElement('div');
