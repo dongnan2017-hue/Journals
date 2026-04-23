@@ -718,6 +718,14 @@
 
   // --- Reader ---
   let allEntries = [];
+  let authorName = null;
+
+  async function loadAuthor() {
+    try {
+      const r = await fetch('/api/author').then(r => r.json());
+      authorName = (r && r.name) || null;
+    } catch { authorName = null; }
+  }
 
   async function loadTimeline() {
     const timeline = document.getElementById('timeline');
@@ -734,7 +742,7 @@
         published: meta.published,
       });
     }
-    await Promise.all([loadTags(), loadStats(), loadCalendar()]);
+    await Promise.all([loadTags(), loadStats(), loadCalendar(), loadAuthor()]);
     renderEntries(allEntries);
   }
 
@@ -782,7 +790,8 @@
       }
       const wc = document.createElement('div');
       wc.className = 'entry-wc muted';
-      wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}`;
+      const byline = authorName ? ` · by ${authorName}` : '';
+      wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}${byline}`;
       const body = document.createElement('div');
       body.className = 'entry-body ql-editor';
       body.innerHTML = html || '<p class="muted">(empty)</p>';

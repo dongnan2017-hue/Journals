@@ -47,6 +47,19 @@ try {
   process.exit(1);
 }
 
+const WRITER_NAME_FILE = path.join(ENTRIES_DIR, 'writer-name.json');
+async function getWriterName() {
+  try {
+    const raw = await fs.readFile(WRITER_NAME_FILE, 'utf8');
+    const name = JSON.parse(raw).name;
+    return (typeof name === 'string' && name.trim()) ? name.trim() : null;
+  } catch { return null; }
+}
+async function setWriterName(name) {
+  if (name) await fs.writeFile(WRITER_NAME_FILE, JSON.stringify({ name }, null, 2), 'utf8');
+  else await fs.unlink(WRITER_NAME_FILE).catch(() => {});
+}
+
 try {
   dbmod.openDb();
   await dbmod.rebuildFromFiles(ENTRIES_DIR);
@@ -73,10 +86,11 @@ app.use(session({
 
 app.use('/static', express.static(path.join(__dirname, 'public')));
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { password } = req.body || {};
   if (password === WRITER_PASSWORD) {
     req.session.role = 'writer';
+    req.session.nickname = await getWriterName();
     return res.json({ role: 'writer' });
   }
   if (password === READER_PASSWORD) {
@@ -100,11 +114,19 @@ app.get('/api/me', (req, res) => {
 app.patch('/api/me', (req, res, next) => {
   if (!req.session.role) return res.status(401).json({ error: 'Not logged in' });
   next();
-}, (req, res) => {
+}, async (req, res) => {
   let nickname = String((req.body || {}).nickname || '').trim();
   nickname = nickname.replace(/[<>]/g, '').slice(0, 40);
   req.session.nickname = nickname || null;
+  // Persist writer's name so everyone (incl. reader) sees it on entries
+  if (req.session.role === 'writer') {
+    try { await setWriterName(nickname || null); } catch (e) { console.error('setWriterName', e); }
+  }
   res.json({ role: req.session.role, nickname: req.session.nickname });
+});
+
+app.get('/api/author', async (_req, res) => {
+  res.json({ name: await getWriterName() });
 });
 
 function requireAuth(req, res, next) {
