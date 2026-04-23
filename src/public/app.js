@@ -306,6 +306,62 @@
     updateWordCountUI(e.html);
     document.querySelectorAll('#entry-tabs .entry-tab').forEach(b =>
       b.classList.toggle('active', b.dataset.id === id));
+    document.querySelectorAll('#recent-entries .recent-item').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === id));
+  }
+
+  async function loadRecentSidebar() {
+    if (!isWriter) return;
+    const wrap = document.getElementById('recent-entries');
+    wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">Loading…</p>';
+    const list = await fetch('/api/entries').then(r => r.json()).catch(() => []);
+    if (!list.length) { wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">No entries yet.</p>'; return; }
+    wrap.innerHTML = '';
+    for (const meta of list.slice(0, 25)) {
+      const e = await fetch(`/api/entries/${meta.id}`).then(r => r.json()).catch(() => null);
+      if (!e) continue;
+      const item = document.createElement('div');
+      item.className = 'recent-item';
+      item.dataset.id = meta.id;
+
+      const imgMatch = (e.html || '').match(/<img[^>]+src=["']([^"']+)["']/i);
+      const thumb = document.createElement('div');
+      thumb.className = 'recent-thumb';
+      if (imgMatch) {
+        const img = document.createElement('img');
+        img.src = imgMatch[1];
+        img.loading = 'lazy';
+        thumb.appendChild(img);
+      } else if (/<audio/i.test(e.html || '')) {
+        thumb.textContent = '🎵';
+      } else if (/<iframe/i.test(e.html || '')) {
+        thumb.textContent = '▶';
+      } else {
+        thumb.textContent = '📝';
+      }
+
+      const bodyTmp = document.createElement('div');
+      bodyTmp.innerHTML = e.html || '';
+      const text = (bodyTmp.textContent || '').trim();
+      const snippet = text.length > 100 ? text.slice(0, 100) + '…' : (text || '(empty)');
+
+      const body = document.createElement('div');
+      body.className = 'recent-body';
+      body.innerHTML = `
+        <div class="recent-date">${formatEntryTime(meta.id)} · ${meta.date}${meta.published === false ? ' <span class="recent-draft">· Draft</span>' : ''}</div>
+        <div class="recent-snippet"></div>
+      `;
+      body.querySelector('.recent-snippet').textContent = snippet;
+
+      item.appendChild(thumb);
+      item.appendChild(body);
+      item.onclick = async () => {
+        document.getElementById('date-picker').value = meta.date;
+        await selectDate(meta.date);
+        await loadEntry(meta.id);
+      };
+      wrap.appendChild(item);
+    }
   }
 
   async function createNewEntry() {
@@ -320,6 +376,7 @@
     await renderEntryTabs(currentDate);
     await loadEntry(id);
     quill.focus();
+    loadRecentSidebar();
   }
 
   async function deleteCurrentEntry() {
@@ -330,6 +387,7 @@
     currentEntryId = null;
     document.getElementById('entry-editor-wrap').classList.add('hidden');
     await renderEntryTabs(date);
+    loadRecentSidebar();
   }
 
   function updatePublishUI(published, html) {
@@ -396,6 +454,8 @@
         const sp = tab.querySelector('span.muted');
         if (sp) sp.textContent = `· ${n} word${n === 1 ? '' : 's'}`;
       }
+      // Refresh sidebar so the thumbnail snippet updates
+      loadRecentSidebar();
     }
     else { setStatus('Save failed — try again'); }
   }
@@ -644,6 +704,7 @@
     });
 
     await selectDate(todayStr());
+    loadRecentSidebar();
     showView('write');
   } else {
     showView('read');

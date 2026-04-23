@@ -27,34 +27,43 @@
   </header>
 
   <main id="write" class="view">
-    <div class="write-toolbar">
-      <label>Date
-        <input type="date" id="date-picker">
-      </label>
-      <button type="button" id="new-entry-btn">＋ New entry</button>
-      <span id="save-status" class="muted"></span>
-    </div>
+    <div class="write-layout">
+      <div class="write-main">
+        <div class="write-toolbar">
+          <label>Date
+            <input type="date" id="date-picker">
+          </label>
+          <button type="button" id="new-entry-btn">＋ New entry</button>
+          <span id="save-status" class="muted"></span>
+        </div>
 
-    <div id="entry-tabs" class="entry-tabs"></div>
+        <div id="entry-tabs" class="entry-tabs"></div>
 
-    <div id="entry-editor-wrap" class="hidden">
-      <div class="entry-actions">
-        <span id="entry-time-label" class="muted"></span>
-        <span id="entry-word-count" class="muted"></span>
-        <div class="spacer"></div>
-        <button type="button" id="publish-btn">Publish</button>
-        <span id="draft-badge" class="draft-badge hidden">Draft</span>
-        <button type="button" id="delete-entry-btn" class="danger-btn">Delete</button>
+        <div id="entry-editor-wrap" class="hidden">
+          <div class="entry-actions">
+            <span id="entry-time-label" class="muted"></span>
+            <span id="entry-word-count" class="muted"></span>
+            <div class="spacer"></div>
+            <button type="button" id="publish-btn">Publish</button>
+            <span id="draft-badge" class="draft-badge hidden">Draft</span>
+            <button type="button" id="delete-entry-btn" class="danger-btn">Delete</button>
+          </div>
+
+          <section id="on-this-day" class="otd hidden">
+            <h3>On this day</h3>
+            <div id="otd-list"></div>
+          </section>
+
+          <div id="editor-container">
+            <div id="editor"></div>
+          </div>
+        </div>
       </div>
 
-      <section id="on-this-day" class="otd hidden">
-        <h3>On this day</h3>
-        <div id="otd-list"></div>
-      </section>
-
-      <div id="editor-container">
-        <div id="editor"></div>
-      </div>
+      <aside class="write-sidebar">
+        <h3>Recent entries</h3>
+        <div id="recent-entries"></div>
+      </aside>
     </div>
     <input type="file" id="photo-input" accept="image/*" multiple hidden>
     <input type="file" id="audio-input" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.flac" hidden>
