@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Journal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <nav class="tabs">
+      <button class="tab" data-view="write">Write</button>
+      <button class="tab" data-view="read">Read</button>
+    </nav>
+    <div class="spacer"></div>
+    <span id="role-label" class="muted"></span>
+    <button id="backup-btn" title="Download a zip backup">Backup</button>
+    <button id="logout">Log out</button>
+  </header>
+
+  <main id="write" class="view">
+    <div class="write-toolbar">
+      <label>Date
+        <input type="date" id="date-picker">
+      </label>
+      <span id="save-status" class="muted"></span>
+    </div>
+    <div id="editor-container">
+      <div id="editor"></div>
+    </div>
+    <input type="file" id="photo-input" accept="image/*" hidden>
+  </main>
+
+  <main id="read" class="view hidden">
+    <div id="timeline"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Journal</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="login-page">
+  <form id="login">
+    <h1>Journal</h1>
+    <input type="password" name="password" placeholder="Password" autofocus required autocomplete="current-password">
+    <button type="submit">Enter</button>
+    <div id="err" class="error" role="alert"></div>
+  </form>
+  <script>
+    const form = document.getElementById('login');
+    const err = document.getElementById('err');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: form.password.value }),
+      });
+      if (r.ok) location.href = '/';
+      else err.textContent = 'Wrong password';
+    });
+  </script>
+</body>
+</html>

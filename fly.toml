@@ -1,0 +1,26 @@
+# Rename "app" below to something unique before first deploy.
+# Fly will reject duplicate names. Example: "nan-journal".
+
+app = "your-journal-app-name"
+primary_region = "iad"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  ENTRIES_DIR = "/data/entries"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = "journal_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
