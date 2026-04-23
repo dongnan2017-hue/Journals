@@ -356,15 +356,22 @@
   function renderRecentSidebar() {
     const wrap = document.getElementById('recent-entries');
     wrap.innerHTML = '';
-    const items = sidebarActiveTag
-      ? sidebarRecentCache.filter(({ html }) => {
-          const text = new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
-          return text.toLowerCase().includes(sidebarActiveTag);
-        })
-      : sidebarRecentCache;
+    const commentsOnlyCheck = document.getElementById('write-comments-only');
+    const withCommentsOnly = commentsOnlyCheck && commentsOnlyCheck.checked;
+    let items = sidebarRecentCache;
+    if (sidebarActiveTag) {
+      items = items.filter(({ html }) => {
+        const text = new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
+        return text.toLowerCase().includes(sidebarActiveTag);
+      });
+    }
+    if (withCommentsOnly) {
+      items = items.filter(({ meta }) => (meta.commentCount || 0) > 0);
+    }
 
     if (!items.length) {
-      wrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No recent entries with ${sidebarActiveTag}.</p>`;
+      const suffix = sidebarActiveTag ? ` with ${sidebarActiveTag}` : (withCommentsOnly ? ' with comments' : '');
+      wrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No recent entries${suffix}.</p>`;
       return;
     }
 
@@ -393,8 +400,9 @@
 
       const body = document.createElement('div');
       body.className = 'recent-body';
+      const cc = (meta.commentCount || 0) > 0 ? ` · 💬 ${meta.commentCount}` : '';
       body.innerHTML = `
-        <div class="recent-date">${formatEntryTime(meta.id)} · ${meta.date}${meta.published === false ? ' <span class="recent-draft">· Draft</span>' : ''}</div>
+        <div class="recent-date">${formatEntryTime(meta.id)} · ${meta.date}${cc}${meta.published === false ? ' <span class="recent-draft">· Draft</span>' : ''}</div>
         <div class="recent-snippet"></div>
       `;
       body.querySelector('.recent-snippet').textContent = snippet;
@@ -736,6 +744,8 @@
       scheduleSave();
     });
 
+    document.getElementById('write-comments-only')?.addEventListener('change', renderRecentSidebar);
+
     document.getElementById('refresh-tags-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('refresh-tags-btn');
       btn.disabled = true;
@@ -825,6 +835,7 @@
         html: e.html || '',
         wordCount: meta.wordCount,
         published: meta.published,
+        commentCount: meta.commentCount || 0,
       });
     }
     await Promise.all([loadTags(), loadStats(), loadCalendar(), loadAuthor(), loadReadSidebar()]);
@@ -837,15 +848,22 @@
     const recentWrap = document.getElementById('read-recent-entries');
     if (!recentWrap) return;
     recentWrap.innerHTML = '';
-    const visible = readActiveTag
-      ? allEntries.filter(e => {
-          const text = new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '';
-          return text.toLowerCase().includes(readActiveTag);
-        })
-      : allEntries;
+    const readCommentsOnlyCheck = document.getElementById('read-comments-only');
+    const withCommentsOnlyRead = readCommentsOnlyCheck && readCommentsOnlyCheck.checked;
+    let visible = allEntries;
+    if (readActiveTag) {
+      visible = visible.filter(e => {
+        const text = new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '';
+        return text.toLowerCase().includes(readActiveTag);
+      });
+    }
+    if (withCommentsOnlyRead) {
+      visible = visible.filter(e => (e.commentCount || 0) > 0);
+    }
     const top = visible.slice(0, 25);
     if (!top.length) {
-      recentWrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No entries${readActiveTag ? ' with ' + readActiveTag : ''}.</p>`;
+      const suffix = readActiveTag ? ' with ' + readActiveTag : (withCommentsOnlyRead ? ' with comments' : '');
+      recentWrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No entries${suffix}.</p>`;
     } else {
       for (const e of top) {
         const item = document.createElement('div');
@@ -871,8 +889,9 @@
 
         const body = document.createElement('div');
         body.className = 'recent-body';
+        const cc = (e.commentCount || 0) > 0 ? ` · 💬 ${e.commentCount}` : '';
         body.innerHTML = `
-          <div class="recent-date">${formatEntryTime(e.id)} · ${e.date}</div>
+          <div class="recent-date">${formatEntryTime(e.id)} · ${e.date}${cc}</div>
           <div class="recent-snippet"></div>
         `;
         body.querySelector('.recent-snippet').textContent = snippet;
@@ -922,15 +941,7 @@
   function applyReadTag() {
     const sel = document.getElementById('tag-filter');
     if (sel) sel.value = readActiveTag || '';
-    if (!readActiveTag) {
-      renderEntries(allEntries);
-      return;
-    }
-    const filtered = allEntries.filter(e => {
-      const text = (new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '').toLowerCase();
-      return text.includes(readActiveTag);
-    });
-    renderEntries(filtered);
+    renderEntries(applyFilters());
   }
 
   document.getElementById('read-refresh-tags-btn')?.addEventListener('click', async () => {
@@ -943,16 +954,24 @@
     btn.disabled = false;
   });
 
-  function renderEntries(entries) {
+  document.getElementById('read-comments-only')?.addEventListener('change', () => {
+    const sidebarCheck = document.getElementById('read-comments-only');
+    const toolbarCheck = document.getElementById('comments-only');
+    if (toolbarCheck) toolbarCheck.checked = sidebarCheck.checked;
+    loadReadSidebar();
+    if (searchInput.value.trim()) searchInput.dispatchEvent(new Event('input'));
+    else renderEntries(applyFilters());
+  });
+
+  function renderEntries(entries, searchHits) {
     const timeline = document.getElementById('timeline');
     if (!entries.length) {
       timeline.innerHTML = '<p class="muted">No entries yet.</p>';
       return;
     }
     timeline.innerHTML = '';
-    // Oldest-first reads more naturally for reader; keep newest-first for writer
     const ordered = isWriter ? entries : [...entries].reverse();
-    for (const { id, date, html, wordCount, published } of ordered) {
+    for (const { id, date, html, wordCount, published, commentCount } of ordered) {
       const article = document.createElement('article');
       article.className = 'entry';
       article.id = `entry-${id}`;
@@ -988,7 +1007,20 @@
       const wc = document.createElement('div');
       wc.className = 'entry-wc muted';
       const byline = authorName ? ` · by ${authorName}` : '';
-      wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}${byline}`;
+      const cc = (commentCount || 0) > 0 ? ` · 💬 ${commentCount}` : '';
+      wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}${byline}${cc}`;
+
+      // Search hit banner
+      const hit = searchHits && searchHits.get(id);
+      if (hit) {
+        const banner = document.createElement('div');
+        banner.className = 'search-hit';
+        const label = hit.matchType === 'comment'
+          ? `Comment by ${hit.commentAuthor || 'unknown'}`
+          : (hit.alsoInComments ? 'Entry (also matches in comments)' : 'Entry');
+        banner.innerHTML = `<span class="search-hit-label">${label}:</span> <span class="search-hit-snippet">${hit.snippet}</span>`;
+        article.appendChild(banner);
+      }
       const body = document.createElement('div');
       body.className = 'entry-body ql-editor';
       body.innerHTML = html || '<p class="muted">(empty)</p>';
@@ -1198,14 +1230,38 @@
   const searchInput = document.getElementById('search');
   const tagFilter = document.getElementById('tag-filter');
   const randomBtn = document.getElementById('random-btn');
+  const commentsOnly = document.getElementById('comments-only');
+
+  function applyFilters() {
+    let filtered = allEntries;
+    if (readActiveTag) {
+      filtered = filtered.filter(e => {
+        const text = (new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '').toLowerCase();
+        return text.includes(readActiveTag);
+      });
+    }
+    if (commentsOnly?.checked) {
+      filtered = filtered.filter(e => (e.commentCount || 0) > 0);
+    }
+    return filtered;
+  }
 
   searchInput?.addEventListener('input', debounce(async () => {
     const q = searchInput.value.trim();
-    if (!q) { renderEntries(allEntries); return; }
+    if (!q) { renderEntries(applyFilters()); return; }
     const results = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json());
-    const ids = new Set(results.map(r => r.id));
-    renderEntries(allEntries.filter(e => ids.has(e.id)));
+    const hits = new Map(results.map(r => [r.id, r]));
+    const matched = applyFilters().filter(e => hits.has(e.id));
+    renderEntries(matched, hits);
   }, 250));
+
+  commentsOnly?.addEventListener('change', () => {
+    const sidebarCheck = document.getElementById('read-comments-only');
+    if (sidebarCheck) sidebarCheck.checked = commentsOnly.checked;
+    loadReadSidebar();
+    if (searchInput.value.trim()) searchInput.dispatchEvent(new Event('input'));
+    else renderEntries(applyFilters());
+  });
 
   tagFilter?.addEventListener('change', () => {
     readActiveTag = tagFilter.value.toLowerCase() || null;

@@ -67,10 +67,16 @@ export function deleteEntryById(id) {
   comments = comments.filter(c => c.entry_id !== id);
 }
 
+function commentCountFor(entryId) {
+  let n = 0;
+  for (const c of comments) if (c.entry_id === entryId) n++;
+  return n;
+}
+
 export function getAllEntries({ publishedOnly = false } = {}) {
   return [...entries.entries()]
     .filter(([, e]) => !e.trashed && (!publishedOnly || e.published))
-    .map(([id, e]) => ({ id, date: idDate(id), ...e }))
+    .map(([id, e]) => ({ id, date: idDate(id), commentCount: commentCountFor(id), ...e }))
     .sort((a, b) => b.id.localeCompare(a.id));
 }
 
@@ -204,28 +210,60 @@ export async function rebuildFromFiles(entriesDir) {
   }
 }
 
+function buildSnippet(plain, words) {
+  const lower = plain.toLowerCase();
+  const idx = lower.indexOf(words[0]);
+  if (idx === -1) return escapeHtml(plain.slice(0, 100));
+  const start = Math.max(0, idx - 30);
+  const end = Math.min(plain.length, idx + words[0].length + 80);
+  const before = escapeHtml(plain.slice(start, idx));
+  const match = escapeHtml(plain.slice(idx, idx + words[0].length));
+  const after = escapeHtml(plain.slice(idx + words[0].length, end));
+  return (start > 0 ? '…' : '') + before + `<mark>${match}</mark>` + after + (end < plain.length ? '…' : '');
+}
+
 export function searchEntries(query, { limit = 200, publishedOnly = false } = {}) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return [];
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  const results = [];
+  const results = new Map(); // id -> result
   for (const [id, e] of entries) {
     if (e.trashed) continue;
     if (publishedOnly && !e.published) continue;
     const plain = e.plain.toLowerCase();
     if (!words.every(w => plain.includes(w))) continue;
-    const idx = plain.indexOf(words[0]);
-    const start = Math.max(0, idx - 30);
-    const end = Math.min(e.plain.length, idx + words[0].length + 80);
-    const before = escapeHtml(e.plain.slice(start, idx));
-    const match = escapeHtml(e.plain.slice(idx, idx + words[0].length));
-    const after = escapeHtml(e.plain.slice(idx + words[0].length, end));
-    const snippet = (start > 0 ? '…' : '') + before + `<mark>${match}</mark>` + after + (end < e.plain.length ? '…' : '');
-    results.push({ id, date: idDate(id), snippet });
+    results.set(id, {
+      id,
+      date: idDate(id),
+      snippet: buildSnippet(e.plain, words),
+      matchType: 'entry',
+    });
   }
-  results.sort((a, b) => b.id.localeCompare(a.id));
-  return results.slice(0, limit);
+  // Also search comments
+  for (const c of comments) {
+    const e = entries.get(c.entry_id);
+    if (!e) continue;
+    if (e.trashed) continue;
+    if (publishedOnly && !e.published) continue;
+    const body = c.body.toLowerCase();
+    if (!words.every(w => body.includes(w))) continue;
+    if (!results.has(c.entry_id)) {
+      results.set(c.entry_id, {
+        id: c.entry_id,
+        date: idDate(c.entry_id),
+        snippet: buildSnippet(c.body, words),
+        matchType: 'comment',
+        commentAuthor: c.author,
+      });
+    } else {
+      // Entry already matched — annotate that comments also match
+      const r = results.get(c.entry_id);
+      r.alsoInComments = true;
+    }
+  }
+  const sorted = [...results.values()].sort((a, b) => b.id.localeCompare(a.id));
+  return sorted.slice(0, limit);
 }
 
 export function onThisDay(refDate, { publishedOnly = false } = {}) {

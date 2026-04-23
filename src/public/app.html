@@ -73,6 +73,12 @@
       </div>
 
       <aside class="write-sidebar">
+        <div class="sidebar-filters">
+          <label class="toolbar-check">
+            <input type="checkbox" id="write-comments-only">
+            <span>With comments</span>
+          </label>
+        </div>
         <h3>Recent entries</h3>
         <div id="recent-entries"></div>
         <div class="sidebar-section-header">
@@ -144,16 +150,26 @@
         </details>
 
         <div class="read-toolbar">
-          <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">
+          <input type="search" id="search" placeholder="Search entries + comments…" autocomplete="off">
           <button id="random-btn" title="Jump to a random entry">🎲 Random</button>
           <select id="tag-filter" title="Filter by tag">
             <option value="">All tags</option>
           </select>
+          <label class="toolbar-check">
+            <input type="checkbox" id="comments-only">
+            <span>With comments</span>
+          </label>
         </div>
         <div id="timeline"></div>
       </div>
 
       <aside class="read-sidebar">
+        <div class="sidebar-filters">
+          <label class="toolbar-check">
+            <input type="checkbox" id="read-comments-only">
+            <span>With comments</span>
+          </label>
+        </div>
         <h3>Recent entries</h3>
         <div id="read-recent-entries"></div>
         <div class="sidebar-section-header">
