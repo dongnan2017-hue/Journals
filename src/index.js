@@ -47,13 +47,12 @@ try {
   process.exit(1);
 }
 
-const DB_PATH = process.env.DB_PATH || path.join(ENTRIES_DIR, '..', 'journal.db');
 try {
-  dbmod.openDb(DB_PATH);
+  dbmod.openDb();
   await dbmod.rebuildFromFiles(ENTRIES_DIR);
-  console.log('[journal] DB ready at', DB_PATH);
+  console.log('[journal] In-memory index built from', ENTRIES_DIR);
 } catch (err) {
-  console.error('[journal] Failed to initialize DB at', DB_PATH, err);
+  console.error('[journal] Failed to build index', err);
   process.exit(1);
 }
 
@@ -169,17 +168,11 @@ app.get('/api/on-this-day', requireAuth, (req, res) => {
 });
 
 app.get('/api/random', requireAuth, (req, res) => {
-  const all = dbmod.getDb().prepare(
-    'SELECT date, html FROM entries WHERE length(plain) > 0'
-  ).all();
-  if (!all.length) return res.json(null);
-  res.json(all[Math.floor(Math.random() * all.length)]);
+  res.json(dbmod.randomEntry());
 });
 
 app.get('/api/tags', requireAuth, (req, res) => {
-  const rows = dbmod.getDb().prepare(
-    "SELECT date, plain FROM entries WHERE plain LIKE '%#%'"
-  ).all();
+  const rows = dbmod.getEntriesForHashtagScan();
   const tagCounts = new Map();
   for (const { date, plain } of rows) {
     const tags = plain.match(/#[A-Za-z0-9_]+/g) || [];
@@ -222,16 +215,14 @@ app.post('/api/comments/:date', requireAuth, async (req, res) => {
 app.delete('/api/comments/:id', requireWriter, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
-  const row = dbmod.getDb().prepare('SELECT entry_date FROM comments WHERE id = ?').get(id);
+  const existing = dbmod.getComment(id);
   dbmod.deleteComment(id);
-  if (row) await writeCommentsSidecar(row.entry_date);
+  if (existing) await writeCommentsSidecar(existing.entry_date);
   res.json({ ok: true });
 });
 
 app.get('/print', requireAuth, async (_req, res) => {
-  const entries = dbmod.getDb()
-    .prepare('SELECT date, html FROM entries ORDER BY date')
-    .all();
+  const entries = dbmod.getAllEntries().sort((a, b) => a.date.localeCompare(b.date));
   const body = entries.map(e => {
     const d = new Date(e.date + 'T00:00');
     const formatted = d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
