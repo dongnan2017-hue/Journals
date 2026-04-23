@@ -26,21 +26,36 @@ function escapeHtml(s) {
 
 export function openDb() { /* no-op; kept for API symmetry */ }
 
-export function indexEntry({ date, html, updatedAt, photoCount }) {
+export function indexEntry({ date, html, updatedAt, photoCount, published, publishedAt }) {
+  const prev = entries.get(date);
   entries.set(date, {
-    html: html || '',
-    plain: stripHtml(html),
-    updatedAt,
-    photoCount: photoCount ?? 0,
+    html: html ?? prev?.html ?? '',
+    plain: stripHtml(html ?? prev?.html ?? ''),
+    updatedAt: updatedAt ?? prev?.updatedAt ?? new Date().toISOString(),
+    photoCount: photoCount ?? prev?.photoCount ?? 0,
+    published: typeof published === 'boolean' ? published : (prev?.published ?? true),
+    publishedAt: publishedAt !== undefined ? publishedAt : (prev?.publishedAt ?? null),
   });
+}
+
+export function setPublished(date, published, publishedAt) {
+  const e = entries.get(date);
+  if (!e) return;
+  e.published = !!published;
+  e.publishedAt = publishedAt ?? null;
+}
+
+export function getEntry(date) {
+  return entries.get(date) || null;
 }
 
 export function deleteEntry(date) {
   entries.delete(date);
 }
 
-export function getAllEntries() {
+export function getAllEntries({ publishedOnly = false } = {}) {
   return [...entries.entries()]
+    .filter(([, e]) => !publishedOnly || e.published)
     .map(([date, e]) => ({ date, ...e }))
     .sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -69,27 +84,44 @@ export async function rebuildFromFiles(entriesDir) {
       if (entryMatch) {
         const date = entryMatch[1];
         const htmlFile = path.join(yearDir, f);
+        const metaFile = path.join(yearDir, `${date}.meta.json`);
         const photosDir = path.join(yearDir, date);
         const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
         const stat = await fs.stat(htmlFile).catch(() => ({ mtime: new Date() }));
         const photoList = await fs.readdir(photosDir).catch(() => []);
+        const metaRaw = await fs.readFile(metaFile, 'utf8').catch(() => null);
+        let published = true;
+        let publishedAt = null;
+        if (metaRaw) {
+          try {
+            const meta = JSON.parse(metaRaw);
+            published = meta.published !== false;
+            publishedAt = meta.publishedAt || null;
+          } catch {}
+        }
         indexEntry({
           date,
           html,
           updatedAt: stat.mtime.toISOString(),
           photoCount: photoList.length,
+          published,
+          publishedAt,
         });
       } else if (commentMatch) {
         const data = await fs.readFile(path.join(yearDir, f), 'utf8').catch(() => '[]');
         try {
           const list = JSON.parse(data);
+          // Preserve original ids from sidecar so parent references survive
           for (const c of list) {
+            const id = Number(c.id) || nextCommentId++;
+            if (id >= nextCommentId) nextCommentId = id + 1;
             comments.push({
-              id: nextCommentId++,
+              id,
               entry_date: commentMatch[1],
               author: c.author,
               body: c.body,
               created_at: c.created_at,
+              parent_id: c.parent_id ?? null,
             });
           }
         } catch { /* skip bad file */ }
@@ -98,13 +130,14 @@ export async function rebuildFromFiles(entriesDir) {
   }
 }
 
-export function searchEntries(query, limit = 200) {
+export function searchEntries(query, { limit = 200, publishedOnly = false } = {}) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return [];
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const results = [];
   for (const [date, e] of entries) {
+    if (publishedOnly && !e.published) continue;
     const plain = e.plain.toLowerCase();
     if (!words.every(w => plain.includes(w))) continue;
     const idx = plain.indexOf(words[0]);
@@ -120,31 +153,32 @@ export function searchEntries(query, limit = 200) {
   return results.slice(0, limit);
 }
 
-export function onThisDay(refDate) {
+export function onThisDay(refDate, { publishedOnly = false } = {}) {
   const monthDay = refDate.slice(5);
   return [...entries.entries()]
-    .filter(([date]) => date.slice(5) === monthDay && date < refDate)
+    .filter(([date, e]) => date.slice(5) === monthDay && date < refDate && (!publishedOnly || e.published))
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([date, e]) => ({ date, html: e.html }));
 }
 
-export function randomEntry() {
-  const all = [...entries.entries()].filter(([, e]) => e.plain.length > 0);
+export function randomEntry({ publishedOnly = false } = {}) {
+  const all = [...entries.entries()].filter(([, e]) => e.plain.length > 0 && (!publishedOnly || e.published));
   if (!all.length) return null;
   const [date, e] = all[Math.floor(Math.random() * all.length)];
   return { date, html: e.html };
 }
 
-export function calendar(year) {
+export function calendar(year, { publishedOnly = false } = {}) {
   const prefix = String(year);
   return [...entries.entries()]
-    .filter(([date]) => date.startsWith(prefix + '-'))
-    .map(([date, e]) => ({ date, len: e.plain.length, photo_count: e.photoCount }))
+    .filter(([date, e]) => date.startsWith(prefix + '-') && (!publishedOnly || e.published))
+    .map(([date, e]) => ({ date, len: e.plain.length, photo_count: e.photoCount, published: e.published }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export function stats() {
-  const nonEmpty = [...entries.entries()].filter(([, e]) => e.plain.length > 0);
+export function stats({ publishedOnly = false } = {}) {
+  const nonEmpty = [...entries.entries()]
+    .filter(([, e]) => e.plain.length > 0 && (!publishedOnly || e.published));
   const total = nonEmpty.length;
   const dates = nonEmpty.map(([d]) => d).sort();
   const first = dates[0] || null;
@@ -200,13 +234,14 @@ export function listComments(entryDate) {
     .map(c => ({ ...c }));
 }
 
-export function addComment({ entryDate, author, body }) {
+export function addComment({ entryDate, author, body, parentId = null }) {
   const c = {
     id: nextCommentId++,
     entry_date: entryDate,
     author,
     body,
     created_at: new Date().toISOString(),
+    parent_id: parentId,
   };
   comments.push(c);
   return c;

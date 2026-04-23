@@ -69,12 +69,21 @@ header button:hover, header a:hover { background: #eee; }
   flex-wrap: wrap;
 }
 .write-toolbar input[type="date"],
+.write-toolbar button,
 .read-toolbar input[type="search"],
 .read-toolbar select,
 .read-toolbar button {
   font: inherit; padding: 0.4rem 0.6rem;
   border: 1px solid var(--border); border-radius: 4px;
   background: var(--card);
+}
+.write-toolbar button { cursor: pointer; }
+.write-toolbar button:hover { background: var(--bg); }
+#publish-btn.published { background: #e8f3e8; border-color: #8bae8b; color: #2f6f2f; }
+.draft-badge {
+  background: #fff3cd; color: #856404;
+  border: 1px solid #ffecb5; border-radius: 4px;
+  padding: 0.1rem 0.5rem; font-size: 0.8rem; font-weight: bold;
 }
 .read-toolbar input[type="search"] { flex: 1; min-width: 180px; }
 .read-toolbar button { cursor: pointer; }
@@ -215,6 +224,10 @@ header button:hover, header a:hover { background: #eee; }
   font: inherit; padding: 0 1rem; background: var(--accent); color: white;
   border: 0; border-radius: 4px; cursor: pointer; align-self: stretch;
 }
+.comment-wrap { margin-bottom: 0.25rem; }
+.comment-children { margin-left: 1.5rem; margin-top: 0.25rem; border-left: 2px solid var(--border); padding-left: 0.75rem; }
+.comment.by-writer { background: #f0e9dc; border-left: 3px solid var(--accent); }
+.comment-actions { display: flex; gap: 0.5rem; align-items: center; }
 
 .entry {
   background: var(--card);

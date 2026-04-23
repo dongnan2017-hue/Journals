@@ -1,9 +1,29 @@
 (async () => {
-  const me = await fetch('/api/me').then(r => r.json());
+  let me = await fetch('/api/me').then(r => r.json());
   if (!me.role) { location.href = '/login'; return; }
   const isWriter = me.role === 'writer';
 
-  document.getElementById('role-label').textContent = isWriter ? 'Writing' : 'Reading';
+  const roleLabelEl = document.getElementById('role-label');
+  const nicknameBtn = document.getElementById('nickname-btn');
+
+  function renderMe() {
+    roleLabelEl.textContent = isWriter ? 'Writing' : 'Reading';
+    nicknameBtn.textContent = me.nickname ? `as ${me.nickname}` : 'Set your name';
+  }
+  renderMe();
+
+  nicknameBtn.addEventListener('click', async () => {
+    const nick = prompt('Your display name on comments:', me.nickname || '');
+    if (nick === null) return;
+    const r = await fetch('/api/me', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nickname: nick }),
+    });
+    if (!r.ok) { alert('Could not save name'); return; }
+    me = await r.json();
+    renderMe();
+  });
 
   const writeTab = document.querySelector('[data-view="write"]');
   const backupBtn = document.getElementById('backup-btn');
@@ -229,7 +249,32 @@
     const e = await fetch(`/api/entries/${date}`).then(r => r.json());
     lastSaved = e.html || '';
     quill.root.innerHTML = lastSaved || '<p><br></p>';
+    updatePublishUI(e.published, e.html);
     loadOnThisDay(date);
+  }
+
+  function updatePublishUI(published, html) {
+    const btn = document.getElementById('publish-btn');
+    const badge = document.getElementById('draft-badge');
+    if (!btn) return;
+    const hasContent = html && html.replace(/<[^>]+>/g, '').trim().length > 0;
+    if (!hasContent) {
+      btn.textContent = 'Publish';
+      btn.classList.remove('published');
+      badge.classList.add('hidden');
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+    if (published) {
+      btn.textContent = 'Unpublish';
+      btn.classList.add('published');
+      badge.classList.add('hidden');
+    } else {
+      btn.textContent = 'Publish';
+      btn.classList.remove('published');
+      badge.classList.remove('hidden');
+    }
   }
 
   function setStatus(text) {
@@ -251,7 +296,12 @@
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ html }),
     });
-    if (r.ok) { lastSaved = html; setStatus('Saved'); }
+    if (r.ok) {
+      lastSaved = html;
+      setStatus('Saved');
+      const data = await r.json().catch(() => null);
+      if (data) updatePublishUI(data.published, html);
+    }
     else { setStatus('Save failed — try again'); }
   }
 
@@ -448,6 +498,33 @@
       scheduleSave();
     });
 
+    document.getElementById('publish-btn').addEventListener('click', async () => {
+      if (!currentDate) return;
+      // Make sure we saved first
+      await save();
+      const current = await fetch(`/api/entries/${currentDate}`).then(r => r.json());
+      const r = await fetch(`/api/entries/${currentDate}/publish`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ published: !current.published }),
+      });
+      if (!r.ok) { alert('Failed to change publish state'); return; }
+      const data = await r.json();
+      updatePublishUI(data.published, quill.root.innerHTML);
+      setStatus(data.published ? 'Published' : 'Unpublished (draft)');
+    });
+
+    document.getElementById('new-section-btn').addEventListener('click', () => {
+      const now = new Date();
+      const time = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      const html = `<p><br></p><h3>${time}</h3><p><br></p>`;
+      const len = quill.getLength();
+      quill.clipboard.dangerouslyPasteHTML(Math.max(0, len - 1), html, 'user');
+      quill.setSelection(quill.getLength() - 1, 0);
+      quill.focus();
+      scheduleSave();
+    });
+
     const audioInput = document.getElementById('audio-input');
     audioInput.addEventListener('change', async () => {
       const file = audioInput.files[0];
@@ -531,30 +608,76 @@
   async function renderComments(container, date) {
     container.innerHTML = '<h3>Comments</h3>';
     const list = await fetch(`/api/comments/${date}`).then(r => r.json()).catch(() => []);
-    for (const c of list) {
-      container.appendChild(commentEl(c, date, container));
+    const tree = buildTree(list);
+    const thread = document.createElement('div');
+    thread.className = 'comment-thread';
+    for (const node of tree) {
+      thread.appendChild(renderCommentNode(node, date, container));
     }
-    container.appendChild(commentForm(date, container));
+    container.appendChild(thread);
+    container.appendChild(commentForm(date, container, null, 'Leave a comment…'));
+  }
+
+  function buildTree(list) {
+    const byId = new Map();
+    const roots = [];
+    for (const c of list) byId.set(c.id, { ...c, children: [] });
+    for (const c of list) {
+      const node = byId.get(c.id);
+      if (c.parent_id != null && byId.has(c.parent_id)) {
+        byId.get(c.parent_id).children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    return roots;
+  }
+
+  function renderCommentNode(node, date, container) {
+    const wrap = document.createElement('div');
+    wrap.className = 'comment-wrap';
+    wrap.appendChild(commentEl(node, date, container));
+    if (node.children.length) {
+      const children = document.createElement('div');
+      children.className = 'comment-children';
+      for (const child of node.children) children.appendChild(renderCommentNode(child, date, container));
+      wrap.appendChild(children);
+    }
+    return wrap;
   }
 
   function commentEl(c, date, container) {
     const el = document.createElement('div');
-    el.className = 'comment';
+    el.className = 'comment' + (c.author === 'writer' ? ' by-writer' : '');
     const when = new Date(c.created_at);
     const meta = document.createElement('div');
     meta.className = 'comment-meta';
-    meta.innerHTML = `<span>${c.author} · ${when.toLocaleString()}</span>`;
+    const left = document.createElement('span');
+    left.textContent = `${c.author} · ${when.toLocaleString()}`;
+    const right = document.createElement('span');
+    right.className = 'comment-actions';
+    const reply = document.createElement('button');
+    reply.className = 'link-btn';
+    reply.textContent = 'reply';
+    reply.onclick = () => {
+      const existing = el.querySelector('.comment-form');
+      if (existing) { existing.remove(); return; }
+      el.appendChild(commentForm(date, container, c.id, `Reply to ${c.author}…`));
+    };
+    right.appendChild(reply);
     if (isWriter) {
       const del = document.createElement('button');
       del.className = 'comment-delete';
       del.textContent = 'delete';
       del.onclick = async () => {
-        if (!confirm('Delete this comment?')) return;
+        if (!confirm('Delete this comment (and its replies)?')) return;
         await fetch(`/api/comments/${c.id}`, { method: 'DELETE' });
         renderComments(container, date);
       };
-      meta.appendChild(del);
+      right.appendChild(del);
     }
+    meta.appendChild(left);
+    meta.appendChild(right);
     const body = document.createElement('div');
     body.className = 'comment-body';
     body.textContent = c.body;
@@ -563,10 +686,10 @@
     return el;
   }
 
-  function commentForm(date, container) {
+  function commentForm(date, container, parentId, placeholder) {
     const form = document.createElement('form');
     form.className = 'comment-form';
-    form.innerHTML = `<textarea placeholder="Leave a comment…" required></textarea><button type="submit">Post</button>`;
+    form.innerHTML = `<textarea placeholder="${placeholder}" required></textarea><button type="submit">Post</button>`;
     form.onsubmit = async (e) => {
       e.preventDefault();
       const ta = form.querySelector('textarea');
@@ -575,7 +698,7 @@
       const r = await fetch(`/api/comments/${date}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, parentId }),
       });
       if (!r.ok) { alert('Failed to post comment'); return; }
       ta.value = '';

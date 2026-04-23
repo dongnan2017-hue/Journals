@@ -19,6 +19,7 @@
     </nav>
     <div class="spacer"></div>
     <span id="role-label" class="muted"></span>
+    <button id="nickname-btn" class="link-btn" title="Set your display name"></button>
     <a id="print-btn" href="/print" target="_blank" title="Export entries as PDF">Print</a>
     <button id="backup-btn" title="Download a zip backup">Backup</button>
     <button id="logout">Log out</button>
@@ -29,6 +30,9 @@
       <label>Date
         <input type="date" id="date-picker">
       </label>
+      <button type="button" id="new-section-btn" title="Add a timestamped section below">＋ Section</button>
+      <button type="button" id="publish-btn">Publish</button>
+      <span id="draft-badge" class="draft-badge hidden">Draft</span>
       <span id="save-status" class="muted"></span>
     </div>
 
