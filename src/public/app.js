@@ -150,12 +150,56 @@
     dimInput.oninput = debouncedRerender;
     qualityInput.oninput = debouncedRerender;
 
+    function setDim(newDim) {
+      const clamped = Math.max(Number(dimInput.min), Math.min(Number(dimInput.max), newDim));
+      const step = Number(dimInput.step) || 1;
+      dimInput.value = Math.round(clamped / step) * step;
+      debouncedRerender();
+    }
+
+    const preview = document.getElementById('resize-preview');
+    const handle = document.getElementById('resize-handle');
+
+    const onWheel = (e) => {
+      e.preventDefault();
+      setDim(Number(dimInput.value) + (e.deltaY < 0 ? 128 : -128));
+    };
+    preview.addEventListener('wheel', onWheel, { passive: false });
+
+    let dragStart = null;
+    const onDragStart = (e) => {
+      const pt = e.touches ? e.touches[0] : e;
+      dragStart = { x: pt.clientX, y: pt.clientY, dim: Number(dimInput.value) };
+      e.preventDefault();
+    };
+    const onDragMove = (e) => {
+      if (!dragStart) return;
+      const pt = e.touches ? e.touches[0] : e;
+      const delta = ((pt.clientX - dragStart.x) + (pt.clientY - dragStart.y)) / 2;
+      setDim(dragStart.dim + delta * 6);
+    };
+    const onDragEnd = () => { dragStart = null; };
+
+    handle.addEventListener('mousedown', onDragStart);
+    handle.addEventListener('touchstart', onDragStart, { passive: false });
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('touchmove', onDragMove, { passive: false });
+    window.addEventListener('mouseup', onDragEnd);
+    window.addEventListener('touchend', onDragEnd);
+
     return new Promise((resolve) => {
       function cleanup(result) {
         URL.revokeObjectURL(srcUrl);
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         dimInput.oninput = null;
         qualityInput.oninput = null;
+        preview.removeEventListener('wheel', onWheel);
+        handle.removeEventListener('mousedown', onDragStart);
+        handle.removeEventListener('touchstart', onDragStart);
+        window.removeEventListener('mousemove', onDragMove);
+        window.removeEventListener('touchmove', onDragMove);
+        window.removeEventListener('mouseup', onDragEnd);
+        window.removeEventListener('touchend', onDragEnd);
         dialog.close();
         resolve(result);
       }

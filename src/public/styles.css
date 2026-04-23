@@ -153,11 +153,24 @@ header button:hover, header a:hover { background: #eee; }
 .resize-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; font: inherit; }
 .resize-form h3 { margin: 0; color: var(--accent); font-size: 1rem; }
 .resize-preview {
+  position: relative;
   background: #f3f1eb; border-radius: 4px;
   max-height: 320px; display: flex; align-items: center; justify-content: center;
   overflow: hidden;
+  user-select: none;
+  cursor: ns-resize;
 }
-.resize-preview img { max-width: 100%; max-height: 320px; display: block; }
+.resize-preview img { max-width: 100%; max-height: 320px; display: block; pointer-events: none; }
+.resize-handle {
+  position: absolute; right: 0; bottom: 0;
+  width: 22px; height: 22px;
+  background: var(--accent);
+  cursor: nwse-resize;
+  border-radius: 4px 0 4px 0;
+  box-shadow: -1px -1px 0 var(--card);
+}
+.resize-handle:hover { background: #a8875b; }
+.resize-hint { text-align: center; font-size: 0.8rem; margin-top: -0.25rem; }
 .resize-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
 .resize-form input[type="range"] { width: 100%; }
 .resize-info { font-size: 0.85rem; color: var(--muted); padding: 0.5rem; background: var(--bg); border-radius: 4px; text-align: center; }

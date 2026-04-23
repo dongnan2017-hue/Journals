@@ -46,9 +46,11 @@
   <dialog id="resize-dialog" class="resize-dialog">
     <form method="dialog" class="resize-form">
       <h3>Resize photo before upload</h3>
-      <div class="resize-preview">
+      <div class="resize-preview" id="resize-preview">
         <img id="resize-preview-img" alt="">
+        <div class="resize-handle" id="resize-handle" title="Drag to resize (or scroll)"></div>
       </div>
+      <div class="muted resize-hint">Scroll or drag the corner to resize</div>
       <label>Max dimension: <span id="resize-dim-label">2048</span>px
         <input type="range" id="resize-dim" min="512" max="4096" step="256" value="2048">
       </label>
