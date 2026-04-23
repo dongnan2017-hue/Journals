@@ -129,26 +129,40 @@
 
   <main id="read" class="view hidden">
     <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-    <div id="stats-bar" class="stats-bar"></div>
+    <div class="read-layout">
+      <div class="read-main">
+        <div id="stats-bar" class="stats-bar"></div>
 
-    <details id="calendar-wrap" class="calendar-wrap">
-      <summary>Calendar</summary>
-      <div class="calendar-header">
-        <button id="cal-prev" type="button">‹</button>
-        <span id="cal-year"></span>
-        <button id="cal-next" type="button">›</button>
+        <details id="calendar-wrap" class="calendar-wrap">
+          <summary>Calendar</summary>
+          <div class="calendar-header">
+            <button id="cal-prev" type="button">‹</button>
+            <span id="cal-year"></span>
+            <button id="cal-next" type="button">›</button>
+          </div>
+          <div id="calendar"></div>
+        </details>
+
+        <div class="read-toolbar">
+          <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">
+          <button id="random-btn" title="Jump to a random entry">🎲 Random</button>
+          <select id="tag-filter" title="Filter by tag">
+            <option value="">All tags</option>
+          </select>
+        </div>
+        <div id="timeline"></div>
       </div>
-      <div id="calendar"></div>
-    </details>
 
-    <div class="read-toolbar">
-      <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">
-      <button id="random-btn" title="Jump to a random entry">🎲 Random</button>
-      <select id="tag-filter" title="Filter by tag">
-        <option value="">All tags</option>
-      </select>
+      <aside class="read-sidebar">
+        <h3>Recent entries</h3>
+        <div id="read-recent-entries"></div>
+        <div class="sidebar-section-header">
+          <h3 class="sidebar-section">Tags</h3>
+          <button type="button" id="read-refresh-tags-btn" class="icon-btn" title="Refresh">↻</button>
+        </div>
+        <div id="read-sidebar-tags"></div>
+      </aside>
     </div>
-    <div id="timeline"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>

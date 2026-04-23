@@ -827,9 +827,121 @@
         published: meta.published,
       });
     }
-    await Promise.all([loadTags(), loadStats(), loadCalendar(), loadAuthor()]);
+    await Promise.all([loadTags(), loadStats(), loadCalendar(), loadAuthor(), loadReadSidebar()]);
     renderEntries(allEntries);
   }
+
+  let readActiveTag = null;
+
+  async function loadReadSidebar() {
+    const recentWrap = document.getElementById('read-recent-entries');
+    if (!recentWrap) return;
+    recentWrap.innerHTML = '';
+    const visible = readActiveTag
+      ? allEntries.filter(e => {
+          const text = new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '';
+          return text.toLowerCase().includes(readActiveTag);
+        })
+      : allEntries;
+    const top = visible.slice(0, 25);
+    if (!top.length) {
+      recentWrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No entries${readActiveTag ? ' with ' + readActiveTag : ''}.</p>`;
+    } else {
+      for (const e of top) {
+        const item = document.createElement('div');
+        item.className = 'recent-item';
+        item.dataset.id = e.id;
+
+        const imgMatch = (e.html || '').match(/<img[^>]+src=["']([^"']+)["']/i);
+        const thumb = document.createElement('div');
+        thumb.className = 'recent-thumb';
+        if (imgMatch) {
+          const img = document.createElement('img');
+          img.src = imgMatch[1];
+          img.loading = 'lazy';
+          thumb.appendChild(img);
+        } else if (/<audio/i.test(e.html || '')) thumb.textContent = '🎵';
+        else if (/<iframe/i.test(e.html || '')) thumb.textContent = '▶';
+        else thumb.textContent = '📝';
+
+        const bodyTmp = document.createElement('div');
+        bodyTmp.innerHTML = e.html || '';
+        const text = (bodyTmp.textContent || '').trim();
+        const snippet = text.length > 100 ? text.slice(0, 100) + '…' : (text || '(empty)');
+
+        const body = document.createElement('div');
+        body.className = 'recent-body';
+        body.innerHTML = `
+          <div class="recent-date">${formatEntryTime(e.id)} · ${e.date}</div>
+          <div class="recent-snippet"></div>
+        `;
+        body.querySelector('.recent-snippet').textContent = snippet;
+
+        item.appendChild(thumb);
+        item.appendChild(body);
+        item.onclick = () => {
+          const el = document.getElementById(`entry-${e.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            el.style.transition = 'background 1s';
+            el.style.background = '#fff6e0';
+            setTimeout(() => { el.style.background = ''; }, 1500);
+          }
+        };
+        recentWrap.appendChild(item);
+      }
+    }
+
+    const tagsWrap = document.getElementById('read-sidebar-tags');
+    tagsWrap.innerHTML = '';
+    const tags = await fetch('/api/tags').then(r => r.json()).catch(() => []);
+    if (!tags.length) {
+      tagsWrap.innerHTML = '<p class="muted" style="font-size:0.85rem">No tags yet.</p>';
+    } else {
+      const allPill = document.createElement('button');
+      allPill.type = 'button';
+      allPill.className = 'tag-pill' + (readActiveTag === null ? ' active' : '');
+      allPill.textContent = 'All';
+      allPill.onclick = () => { readActiveTag = null; applyReadTag(); loadReadSidebar(); };
+      tagsWrap.appendChild(allPill);
+      for (const { tag, count } of tags) {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'tag-pill' + (readActiveTag === tag ? ' active' : '');
+        pill.textContent = `${tag} · ${count}`;
+        pill.onclick = () => {
+          readActiveTag = readActiveTag === tag ? null : tag;
+          applyReadTag();
+          loadReadSidebar();
+        };
+        tagsWrap.appendChild(pill);
+      }
+    }
+  }
+
+  function applyReadTag() {
+    const sel = document.getElementById('tag-filter');
+    if (sel) sel.value = readActiveTag || '';
+    if (!readActiveTag) {
+      renderEntries(allEntries);
+      return;
+    }
+    const filtered = allEntries.filter(e => {
+      const text = (new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '').toLowerCase();
+      return text.includes(readActiveTag);
+    });
+    renderEntries(filtered);
+  }
+
+  document.getElementById('read-refresh-tags-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('read-refresh-tags-btn');
+    btn.disabled = true;
+    btn.classList.add('spinning');
+    readActiveTag = null;
+    await loadTimeline();
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  });
 
   function renderEntries(entries) {
     const timeline = document.getElementById('timeline');
@@ -1096,13 +1208,9 @@
   }, 250));
 
   tagFilter?.addEventListener('change', () => {
-    const tag = tagFilter.value.toLowerCase();
-    if (!tag) { renderEntries(allEntries); return; }
-    const filtered = allEntries.filter(e => {
-      const text = (new DOMParser().parseFromString(e.html, 'text/html').body.textContent || '').toLowerCase();
-      return text.includes(tag);
-    });
-    renderEntries(filtered);
+    readActiveTag = tagFilter.value.toLowerCase() || null;
+    applyReadTag();
+    loadReadSidebar();
   });
 
   randomBtn?.addEventListener('click', async () => {
