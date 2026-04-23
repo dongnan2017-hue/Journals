@@ -16,6 +16,7 @@
     <nav class="tabs">
       <button class="tab" data-view="write">Write</button>
       <button class="tab" data-view="read">Read</button>
+      <button class="tab" data-view="trash" id="trash-tab">Trash</button>
     </nav>
     <div class="spacer"></div>
     <span id="role-label" class="muted"></span>
@@ -90,6 +91,15 @@
       </div>
     </form>
   </dialog>
+
+  <main id="trash" class="view hidden">
+    <div class="trash-header">
+      <h2>Trash</h2>
+      <button type="button" id="empty-trash-btn" class="danger-btn">Empty trash</button>
+    </div>
+    <p class="muted">Entries you delete go here. Restore anytime, or empty the trash to permanently delete.</p>
+    <div id="trash-list"></div>
+  </main>
 
   <main id="read" class="view hidden">
     <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>

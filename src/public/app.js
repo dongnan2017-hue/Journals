@@ -26,10 +26,12 @@
   });
 
   const writeTab = document.querySelector('[data-view="write"]');
+  const trashTab = document.getElementById('trash-tab');
   const backupBtn = document.getElementById('backup-btn');
   const printBtn = document.getElementById('print-btn');
   if (!isWriter) {
     writeTab.style.display = 'none';
+    trashTab.style.display = 'none';
     backupBtn.style.display = 'none';
     printBtn.style.display = 'none';
   }
@@ -38,6 +40,7 @@
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('hidden', v.id !== name));
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
     if (name === 'read') loadTimeline();
+    if (name === 'trash') loadTrash();
   }
 
   document.querySelectorAll('.tab').forEach(t => {
@@ -321,7 +324,7 @@
 
   async function deleteCurrentEntry() {
     if (!currentEntryId) return;
-    if (!confirm('Delete this entry permanently? Photos and comments will also be removed.')) return;
+    if (!confirm('Move this entry to the trash? (You can restore it from the Trash tab.)')) return;
     await fetch(`/api/entries/${currentEntryId}`, { method: 'DELETE' });
     const date = currentDate;
     currentEntryId = null;
@@ -925,6 +928,48 @@
       el.style.background = '#fff6e0';
       setTimeout(() => { el.style.background = ''; }, 1500);
     }
+  });
+
+  // --- Trash ---
+  async function loadTrash() {
+    const list = document.getElementById('trash-list');
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    const items = await fetch('/api/trash').then(r => r.json()).catch(() => []);
+    if (!items.length) { list.innerHTML = '<p class="muted">Trash is empty.</p>'; return; }
+    list.innerHTML = '';
+    for (const it of items) {
+      const card = document.createElement('div');
+      card.className = 'trash-card';
+      const trashedWhen = it.trashedAt ? new Date(it.trashedAt).toLocaleString() : '';
+      card.innerHTML = `
+        <div class="trash-meta">
+          <strong>${formatDate(it.date)} — ${formatEntryTime(it.id)}</strong>
+          <span class="muted">${it.wordCount} word${it.wordCount === 1 ? '' : 's'} · trashed ${trashedWhen}</span>
+        </div>
+        <div class="trash-snippet muted"></div>
+        <div class="trash-actions">
+          <button class="restore-btn">Restore</button>
+          <button class="danger-btn perm-del-btn">Delete permanently</button>
+        </div>
+      `;
+      card.querySelector('.trash-snippet').textContent = it.snippet || '(empty)';
+      card.querySelector('.restore-btn').onclick = async () => {
+        await fetch(`/api/entries/${it.id}/restore`, { method: 'POST' });
+        loadTrash();
+      };
+      card.querySelector('.perm-del-btn').onclick = async () => {
+        if (!confirm('Permanently delete this entry? This cannot be undone.')) return;
+        await fetch(`/api/entries/${it.id}/permanent`, { method: 'DELETE' });
+        loadTrash();
+      };
+      list.appendChild(card);
+    }
+  }
+
+  document.getElementById('empty-trash-btn')?.addEventListener('click', async () => {
+    if (!confirm('Permanently delete ALL entries in the trash? This cannot be undone.')) return;
+    await fetch('/api/trash/empty', { method: 'POST' });
+    loadTrash();
   });
 
   // Reading progress bar

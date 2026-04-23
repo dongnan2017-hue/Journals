@@ -29,7 +29,7 @@ function escapeHtml(s) {
 
 export function openDb() { /* no-op; kept for API symmetry */ }
 
-export function indexEntry({ id, html, updatedAt, photoCount, published, publishedAt }) {
+export function indexEntry({ id, html, updatedAt, photoCount, published, publishedAt, trashed, trashedAt }) {
   const prev = entries.get(id);
   entries.set(id, {
     html: html ?? prev?.html ?? '',
@@ -38,6 +38,8 @@ export function indexEntry({ id, html, updatedAt, photoCount, published, publish
     photoCount: photoCount ?? prev?.photoCount ?? 0,
     published: typeof published === 'boolean' ? published : (prev?.published ?? true),
     publishedAt: publishedAt !== undefined ? publishedAt : (prev?.publishedAt ?? null),
+    trashed: typeof trashed === 'boolean' ? trashed : (prev?.trashed ?? false),
+    trashedAt: trashedAt !== undefined ? trashedAt : (prev?.trashedAt ?? null),
   });
 }
 
@@ -46,6 +48,13 @@ export function setPublished(id, published, publishedAt) {
   if (!e) return;
   e.published = !!published;
   e.publishedAt = publishedAt ?? null;
+}
+
+export function setTrashed(id, trashed, trashedAt) {
+  const e = entries.get(id);
+  if (!e) return;
+  e.trashed = !!trashed;
+  e.trashedAt = trashedAt ?? null;
 }
 
 export function getEntry(id) {
@@ -60,21 +69,28 @@ export function deleteEntryById(id) {
 
 export function getAllEntries({ publishedOnly = false } = {}) {
   return [...entries.entries()]
-    .filter(([, e]) => !publishedOnly || e.published)
+    .filter(([, e]) => !e.trashed && (!publishedOnly || e.published))
     .map(([id, e]) => ({ id, date: idDate(id), ...e }))
     .sort((a, b) => b.id.localeCompare(a.id));
 }
 
 export function getEntriesForDate(date, { publishedOnly = false } = {}) {
   return [...entries.entries()]
-    .filter(([id, e]) => idDate(id) === date && (!publishedOnly || e.published))
+    .filter(([id, e]) => idDate(id) === date && !e.trashed && (!publishedOnly || e.published))
     .map(([id, e]) => ({ id, date: idDate(id), ...e }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+export function getTrashedEntries() {
+  return [...entries.entries()]
+    .filter(([, e]) => e.trashed)
+    .map(([id, e]) => ({ id, date: idDate(id), ...e }))
+    .sort((a, b) => (b.trashedAt || '').localeCompare(a.trashedAt || ''));
+}
+
 export function getEntriesForHashtagScan() {
   return [...entries.entries()]
-    .filter(([, e]) => e.plain.includes('#'))
+    .filter(([, e]) => !e.trashed && e.plain.includes('#'))
     .map(([id, e]) => ({ id, date: idDate(id), plain: e.plain }));
 }
 
@@ -145,11 +161,15 @@ export async function rebuildFromFiles(entriesDir) {
         const metaRaw = await fs.readFile(metaFile, 'utf8').catch(() => null);
         let published = true;
         let publishedAt = null;
+        let trashed = false;
+        let trashedAt = null;
         if (metaRaw) {
           try {
             const meta = JSON.parse(metaRaw);
             published = meta.published !== false;
             publishedAt = meta.publishedAt || null;
+            trashed = meta.trashed === true;
+            trashedAt = meta.trashedAt || null;
           } catch {}
         }
         indexEntry({
@@ -159,6 +179,8 @@ export async function rebuildFromFiles(entriesDir) {
           photoCount: photoList.length,
           published,
           publishedAt,
+          trashed,
+          trashedAt,
         });
       } else if (commentMatch) {
         const data = await fs.readFile(path.join(yearDir, f), 'utf8').catch(() => '[]');
@@ -189,6 +211,7 @@ export function searchEntries(query, { limit = 200, publishedOnly = false } = {}
   if (!words.length) return [];
   const results = [];
   for (const [id, e] of entries) {
+    if (e.trashed) continue;
     if (publishedOnly && !e.published) continue;
     const plain = e.plain.toLowerCase();
     if (!words.every(w => plain.includes(w))) continue;
@@ -209,6 +232,7 @@ export function onThisDay(refDate, { publishedOnly = false } = {}) {
   const monthDay = refDate.slice(5);
   return [...entries.entries()]
     .filter(([id, e]) => {
+      if (e.trashed) return false;
       const d = idDate(id);
       return d.slice(5) === monthDay && d < refDate && (!publishedOnly || e.published);
     })
@@ -217,7 +241,7 @@ export function onThisDay(refDate, { publishedOnly = false } = {}) {
 }
 
 export function randomEntry({ publishedOnly = false } = {}) {
-  const all = [...entries.entries()].filter(([, e]) => e.plain.length > 0 && (!publishedOnly || e.published));
+  const all = [...entries.entries()].filter(([, e]) => !e.trashed && e.plain.length > 0 && (!publishedOnly || e.published));
   if (!all.length) return null;
   const [id, e] = all[Math.floor(Math.random() * all.length)];
   return { id, date: idDate(id), html: e.html };
@@ -227,6 +251,7 @@ export function calendar(year, { publishedOnly = false } = {}) {
   const prefix = String(year);
   const byDate = new Map();
   for (const [id, e] of entries) {
+    if (e.trashed) continue;
     if (!idDate(id).startsWith(prefix + '-')) continue;
     if (publishedOnly && !e.published) continue;
     const date = idDate(id);
@@ -241,7 +266,7 @@ export function calendar(year, { publishedOnly = false } = {}) {
 
 export function stats({ publishedOnly = false } = {}) {
   const nonEmpty = [...entries.entries()]
-    .filter(([, e]) => e.plain.length > 0 && (!publishedOnly || e.published));
+    .filter(([, e]) => !e.trashed && e.plain.length > 0 && (!publishedOnly || e.published));
   const total = nonEmpty.length;
   const dates = nonEmpty.map(([d]) => d).sort();
   const first = dates[0] || null;

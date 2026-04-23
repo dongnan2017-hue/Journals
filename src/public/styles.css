@@ -111,6 +111,19 @@ header button:hover, header a:hover { background: #eee; }
 
 .entry-wc { font-size: 0.85rem; margin-top: -0.5rem; margin-bottom: 0.75rem; }
 
+.trash-header { display: flex; align-items: center; gap: 1rem; justify-content: space-between; }
+.trash-header h2 { margin: 0; color: var(--accent); }
+.trash-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 1rem; margin-bottom: 0.75rem;
+}
+.trash-meta { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
+.trash-snippet { font-size: 0.9rem; margin-bottom: 0.5rem; font-style: italic; }
+.trash-actions { display: flex; gap: 0.5rem; }
+.trash-actions button { font: inherit; padding: 0.4rem 0.8rem; border: 1px solid var(--border); border-radius: 4px; background: var(--card); cursor: pointer; font-size: 0.9rem; }
+.trash-actions .restore-btn { background: var(--accent); color: white; border-color: var(--accent); }
+.trash-actions .restore-btn:hover { background: #a8875b; }
+
 .progress-bar {
   position: sticky; top: 0; z-index: 20;
   height: 3px; background: rgba(0,0,0,0.05);

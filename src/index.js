@@ -152,10 +152,20 @@ function newEntryId(forDate) {
   return `${forDate}-${time}`;
 }
 
-async function writeMeta(id, { published, publishedAt }) {
+async function writeMeta(id, fields) {
   const { dir, metaFile } = entryPaths(id);
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(metaFile, JSON.stringify({ published: !!published, publishedAt: publishedAt || null }, null, 2), 'utf8');
+  // Merge with existing meta so we don't wipe unrelated fields.
+  let existing = {};
+  try { existing = JSON.parse(await fs.readFile(metaFile, 'utf8')); } catch {}
+  const merged = {
+    published: existing.published !== false,
+    publishedAt: existing.publishedAt || null,
+    trashed: existing.trashed === true,
+    trashedAt: existing.trashedAt || null,
+    ...fields,
+  };
+  await fs.writeFile(metaFile, JSON.stringify(merged, null, 2), 'utf8');
 }
 
 function isReader(req) { return req.session.role === 'reader'; }
@@ -322,7 +332,9 @@ app.get('/api/entries/:id', requireAuth, async (req, res) => {
   if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
   const indexed = dbmod.getEntry(id);
   if (!indexed) return res.status(404).json({ error: 'Not found' });
-  if (isReader(req) && !indexed.published) return res.status(404).json({ error: 'Not found' });
+  if (isReader(req) && (!indexed.published || indexed.trashed)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   const { htmlFile, photosDir } = entryPaths(id);
   const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
   const photos = (await fs.readdir(photosDir).catch(() => [])).sort();
@@ -357,6 +369,36 @@ app.put('/api/entries/:id', requireWriter, async (req, res) => {
 app.delete('/api/entries/:id', requireWriter, async (req, res) => {
   const { id } = req.params;
   if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
+  const entry = dbmod.getEntry(id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  const trashedAt = new Date().toISOString();
+  await writeMeta(id, { trashed: true, trashedAt });
+  dbmod.setTrashed(id, true, trashedAt);
+  res.json({ ok: true, trashed: true });
+});
+
+app.get('/api/trash', requireWriter, (req, res) => {
+  const list = dbmod.getTrashedEntries();
+  res.json(list.map(({ id, date, trashedAt, published, plain }) => ({
+    id, date, trashedAt, published,
+    wordCount: plain ? (plain.match(/\S+/g) || []).length : 0,
+    snippet: plain ? plain.slice(0, 140) : '',
+  })));
+});
+
+app.post('/api/entries/:id/restore', requireWriter, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
+  const entry = dbmod.getEntry(id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  await writeMeta(id, { trashed: false, trashedAt: null });
+  dbmod.setTrashed(id, false, null);
+  res.json({ ok: true });
+});
+
+app.delete('/api/entries/:id/permanent', requireWriter, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
   const { htmlFile, metaFile, commentsFile, photosDir } = entryPaths(id);
   await fs.unlink(htmlFile).catch(() => {});
   await fs.unlink(metaFile).catch(() => {});
@@ -364,6 +406,19 @@ app.delete('/api/entries/:id', requireWriter, async (req, res) => {
   await fs.rm(photosDir, { recursive: true, force: true }).catch(() => {});
   dbmod.deleteEntryById(id);
   res.json({ ok: true });
+});
+
+app.post('/api/trash/empty', requireWriter, async (req, res) => {
+  const trashed = dbmod.getTrashedEntries();
+  for (const e of trashed) {
+    const { htmlFile, metaFile, commentsFile, photosDir } = entryPaths(e.id);
+    await fs.unlink(htmlFile).catch(() => {});
+    await fs.unlink(metaFile).catch(() => {});
+    await fs.unlink(commentsFile).catch(() => {});
+    await fs.rm(photosDir, { recursive: true, force: true }).catch(() => {});
+    dbmod.deleteEntryById(e.id);
+  }
+  res.json({ ok: true, count: trashed.length });
 });
 
 app.post('/api/entries/:id/publish', requireWriter, async (req, res) => {
