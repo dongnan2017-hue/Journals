@@ -1,3 +1,5 @@
+console.log('[journal] Starting up, Node', process.version, 'cwd:', process.cwd());
+
 import express from 'express';
 import session from 'express-session';
 import multer from 'multer';
@@ -11,18 +13,38 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const ENTRIES_DIR = process.env.ENTRIES_DIR
   ? path.resolve(process.env.ENTRIES_DIR)
-  : path.resolve(__dirname, '..', '..', 'entries');
+  : path.resolve(__dirname, '..', 'entries');
 const WRITER_PASSWORD = process.env.WRITER_PASSWORD;
 const READER_PASSWORD = process.env.READER_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-if (!WRITER_PASSWORD || !READER_PASSWORD || !SESSION_SECRET) {
-  console.error('WRITER_PASSWORD, READER_PASSWORD, and SESSION_SECRET must be set. See .env.example');
+console.log('[journal] Env vars present:', {
+  WRITER_PASSWORD: !!WRITER_PASSWORD,
+  READER_PASSWORD: !!READER_PASSWORD,
+  SESSION_SECRET: !!SESSION_SECRET,
+  PORT,
+  ENTRIES_DIR,
+  NODE_ENV: process.env.NODE_ENV,
+});
+
+const missing = [];
+if (!WRITER_PASSWORD) missing.push('WRITER_PASSWORD');
+if (!READER_PASSWORD) missing.push('READER_PASSWORD');
+if (!SESSION_SECRET) missing.push('SESSION_SECRET');
+if (missing.length) {
+  console.error('[journal] Missing required env vars:', missing.join(', '));
+  console.error('[journal] Set them in hPanel → your site → Advanced → Node.js (or Environment variables) and redeploy.');
   process.exit(1);
 }
 
-await fs.mkdir(ENTRIES_DIR, { recursive: true });
+try {
+  await fs.mkdir(ENTRIES_DIR, { recursive: true });
+  console.log('[journal] Entries directory ready:', ENTRIES_DIR);
+} catch (err) {
+  console.error('[journal] Failed to create entries dir', ENTRIES_DIR, err);
+  process.exit(1);
+}
 
 const app = express();
 app.set('trust proxy', 1);
@@ -199,7 +221,15 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Journal server listening on http://localhost:${PORT}`);
-  console.log(`Entries directory: ${ENTRIES_DIR}`);
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[journal] Listening on 0.0.0.0:${PORT}`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[journal] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[journal] Unhandled rejection:', err);
 });
