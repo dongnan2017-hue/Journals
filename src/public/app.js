@@ -736,6 +736,16 @@
       scheduleSave();
     });
 
+    document.getElementById('refresh-tags-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('refresh-tags-btn');
+      btn.disabled = true;
+      btn.classList.add('spinning');
+      sidebarActiveTag = null;
+      await loadRecentSidebar();
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+    });
+
     document.getElementById('publish-btn').addEventListener('click', async () => {
       if (!currentEntryId) return;
       await save();

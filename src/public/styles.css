@@ -253,6 +253,29 @@ header button:hover, header a:hover { background: var(--bg-soft); }
 .recent-draft { color: #d39e00; font-weight: 600; }
 
 .sidebar-section { margin-top: 1.25rem !important; }
+.sidebar-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 0.5rem; margin-top: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-section-header h3 {
+  margin: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: 0 !important;
+}
+.icon-btn {
+  font: inherit; font-size: 1rem; line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.icon-btn:hover { background: var(--bg-soft); color: var(--accent); border-color: var(--accent); }
+.icon-btn.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 #sidebar-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .tag-pill {
   font: inherit; font-size: 0.78rem;
