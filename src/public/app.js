@@ -297,6 +297,22 @@
     picker.max = todayStr();
     picker.addEventListener('change', () => loadEntry(picker.value));
 
+    // Register a custom Audio blot so <audio> tags round-trip through Quill.
+    const BlockEmbed = Quill.import('blots/block/embed');
+    class AudioBlot extends BlockEmbed {
+      static create(url) {
+        const node = super.create();
+        node.setAttribute('controls', '');
+        node.setAttribute('preload', 'metadata');
+        node.setAttribute('src', url);
+        return node;
+      }
+      static value(node) { return node.getAttribute('src'); }
+    }
+    AudioBlot.blotName = 'audio';
+    AudioBlot.tagName = 'audio';
+    Quill.register(AudioBlot);
+
     quill = new Quill('#editor', {
       theme: 'snow',
       placeholder: 'Write about today…',
@@ -306,11 +322,12 @@
             [{ header: [1, 2, 3, false] }],
             ['bold', 'italic', 'underline', 'strike'],
             [{ list: 'ordered' }, { list: 'bullet' }],
-            ['blockquote', 'link', 'image', 'video'],
+            ['blockquote', 'link', 'image', 'video', 'audio'],
             ['clean'],
           ],
           handlers: {
             image: () => document.getElementById('photo-input').click(),
+            audio: () => document.getElementById('audio-input').click(),
             video: () => {
               const url = prompt('Paste a YouTube URL:');
               if (!url) return;
@@ -427,6 +444,28 @@
         const html = `<div class="gallery">${uploaded.map(u => `<img src="${u.url}">`).join('')}</div><p></p>`;
         quill.clipboard.dangerouslyPasteHTML(range.index, html, 'user');
       }
+      setStatus('Saving…');
+      scheduleSave();
+    });
+
+    const audioInput = document.getElementById('audio-input');
+    audioInput.addEventListener('change', async () => {
+      const file = audioInput.files[0];
+      audioInput.value = '';
+      if (!file || !currentDate) return;
+      setStatus(`Uploading audio (${formatBytes(file.size)})…`);
+      const fd = new FormData();
+      fd.append('audio', file);
+      const r = await fetch(`/api/entries/${currentDate}/audio`, { method: 'POST', body: fd });
+      if (!r.ok) {
+        const msg = r.status === 413 ? 'File too large' : 'Upload failed';
+        setStatus(msg);
+        return;
+      }
+      const { url } = await r.json();
+      const range = quill.getSelection(true) || { index: quill.getLength() };
+      quill.insertEmbed(range.index, 'audio', url, 'user');
+      quill.setSelection(range.index + 1);
       setStatus('Saving…');
       scheduleSave();
     });

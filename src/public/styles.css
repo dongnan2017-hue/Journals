@@ -136,6 +136,10 @@ header button:hover, header a:hover { background: #eee; }
   border-radius: 4px;
   margin: 0.5rem 0;
 }
+.ql-editor audio, .entry-body audio { width: 100%; margin: 0.5rem 0; display: block; }
+.ql-toolbar.ql-snow .ql-audio { width: auto; padding: 0 0.5rem; font: inherit; }
+.ql-toolbar.ql-snow .ql-audio::before { content: '🎵'; font-size: 0.9rem; }
+.ql-toolbar.ql-snow .ql-audio:hover { color: var(--accent); }
 
 .ql-editor .gallery, .entry-body .gallery {
   display: grid;

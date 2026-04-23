@@ -265,29 +265,42 @@ app.put('/api/entries/:date', requireWriter, async (req, res) => {
   res.json({ ok: true, updatedAt });
 });
 
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: async (req, _file, cb) => {
-      const { date } = req.params;
-      if (!validDate(date)) return cb(new Error('Invalid date'));
-      const { photosDir } = entryPaths(date);
-      try {
-        await fs.mkdir(photosDir, { recursive: true });
-        cb(null, photosDir);
-      } catch (err) { cb(err); }
+const MEDIA_EXT = {
+  image: /^\.(jpg|jpeg|png|gif|webp|heic|heif)$/i,
+  audio: /^\.(mp3|m4a|aac|ogg|oga|wav|flac)$/i,
+};
+
+function makeMediaUpload(kind) {
+  return multer({
+    storage: multer.diskStorage({
+      destination: async (req, _file, cb) => {
+        const { date } = req.params;
+        if (!validDate(date)) return cb(new Error('Invalid date'));
+        const { photosDir } = entryPaths(date);
+        try {
+          await fs.mkdir(photosDir, { recursive: true });
+          cb(null, photosDir);
+        } catch (err) { cb(err); }
+      },
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const defaultExt = kind === 'audio' ? '.mp3' : '.jpg';
+        const re = MEDIA_EXT[kind];
+        const safeExt = re.test(ext) ? ext : defaultExt;
+        cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`);
+      },
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const re = new RegExp(`^${kind}/`);
+      if (re.test(file.mimetype)) cb(null, true);
+      else cb(new Error(`${kind} files only`));
     },
-    filename: (_req, file, cb) => {
-      const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
-      const safeExt = /^\.(jpg|jpeg|png|gif|webp|heic|heif)$/.test(ext) ? ext : '.jpg';
-      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`);
-    },
-  }),
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (/^image\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Images only'));
-  },
-});
+  });
+}
+
+const upload = makeMediaUpload('image');
+const audioUpload = makeMediaUpload('audio');
 
 async function refreshPhotoCount(date) {
   const { photosDir, htmlFile } = entryPaths(date);
@@ -311,6 +324,15 @@ app.post('/api/entries/:date/photos', requireWriter, upload.array('photo', 20), 
       filename: f.filename,
       url: `/photos/${req.params.date}/${f.filename}`,
     })),
+  });
+});
+
+app.post('/api/entries/:date/audio', requireWriter, audioUpload.single('audio'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file' });
+  await refreshPhotoCount(req.params.date);
+  res.json({
+    filename: req.file.filename,
+    url: `/photos/${req.params.date}/${req.file.filename}`,
   });
 });
 
