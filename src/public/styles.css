@@ -85,6 +85,41 @@ header button:hover, header a:hover { background: #eee; }
   border: 1px solid #ffecb5; border-radius: 4px;
   padding: 0.1rem 0.5rem; font-size: 0.8rem; font-weight: bold;
 }
+
+.entry-tabs {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+}
+.entry-tab {
+  padding: 0.5rem 0.75rem; font: inherit; font-size: 0.9rem;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer;
+}
+.entry-tab:hover { background: var(--bg); }
+.entry-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+.entry-tab.active .muted { color: #f5ead8; }
+.draft-dot { color: #d39e00; }
+
+.entry-actions {
+  display: flex; gap: 0.5rem; align-items: center;
+  margin-bottom: 0.5rem; flex-wrap: wrap;
+}
+.entry-actions .spacer { flex: 1; }
+.entry-actions button { font: inherit; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; background: var(--card); cursor: pointer; }
+.entry-actions button:hover { background: var(--bg); }
+.danger-btn { color: #b00020; border-color: #e8b0b5 !important; }
+.danger-btn:hover { background: #fbe6e8 !important; }
+
+.entry-wc { font-size: 0.85rem; margin-top: -0.5rem; margin-bottom: 0.75rem; }
+
+.progress-bar {
+  position: sticky; top: 0; z-index: 20;
+  height: 3px; background: rgba(0,0,0,0.05);
+  margin-left: -1rem; margin-right: -1rem; margin-bottom: 1rem;
+}
+.progress-fill {
+  height: 100%; width: 0; background: var(--accent);
+  transition: width 0.1s linear;
+}
 .read-toolbar input[type="search"] { flex: 1; min-width: 180px; }
 .read-toolbar button { cursor: pointer; }
 .read-toolbar button:hover { background: #eee; }

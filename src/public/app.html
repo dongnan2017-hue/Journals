@@ -30,19 +30,30 @@
       <label>Date
         <input type="date" id="date-picker">
       </label>
-      <button type="button" id="new-section-btn" title="Add a timestamped section below">＋ Section</button>
-      <button type="button" id="publish-btn">Publish</button>
-      <span id="draft-badge" class="draft-badge hidden">Draft</span>
+      <button type="button" id="new-entry-btn">＋ New entry</button>
       <span id="save-status" class="muted"></span>
     </div>
 
-    <section id="on-this-day" class="otd hidden">
-      <h3>On this day</h3>
-      <div id="otd-list"></div>
-    </section>
+    <div id="entry-tabs" class="entry-tabs"></div>
 
-    <div id="editor-container">
-      <div id="editor"></div>
+    <div id="entry-editor-wrap" class="hidden">
+      <div class="entry-actions">
+        <span id="entry-time-label" class="muted"></span>
+        <span id="entry-word-count" class="muted"></span>
+        <div class="spacer"></div>
+        <button type="button" id="publish-btn">Publish</button>
+        <span id="draft-badge" class="draft-badge hidden">Draft</span>
+        <button type="button" id="delete-entry-btn" class="danger-btn">Delete</button>
+      </div>
+
+      <section id="on-this-day" class="otd hidden">
+        <h3>On this day</h3>
+        <div id="otd-list"></div>
+      </section>
+
+      <div id="editor-container">
+        <div id="editor"></div>
+      </div>
     </div>
     <input type="file" id="photo-input" accept="image/*" multiple hidden>
     <input type="file" id="audio-input" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.flac" hidden>
@@ -81,6 +92,7 @@
   </dialog>
 
   <main id="read" class="view hidden">
+    <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
     <div id="stats-bar" class="stats-bar"></div>
 
     <details id="calendar-wrap" class="calendar-wrap">

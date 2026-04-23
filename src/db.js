@@ -4,9 +4,12 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-const entries = new Map(); // date -> { html, plain, updatedAt, photoCount }
-let comments = [];          // [{ id, entry_date, author, body, created_at }]
+// entries map key is entryId: YYYY-MM-DD-HHmmss
+const entries = new Map();
+let comments = [];
 let nextCommentId = 1;
+
+export function idDate(id) { return id.slice(0, 10); }
 
 function stripHtml(html) {
   return String(html || '')
@@ -26,9 +29,9 @@ function escapeHtml(s) {
 
 export function openDb() { /* no-op; kept for API symmetry */ }
 
-export function indexEntry({ date, html, updatedAt, photoCount, published, publishedAt }) {
-  const prev = entries.get(date);
-  entries.set(date, {
+export function indexEntry({ id, html, updatedAt, photoCount, published, publishedAt }) {
+  const prev = entries.get(id);
+  entries.set(id, {
     html: html ?? prev?.html ?? '',
     plain: stripHtml(html ?? prev?.html ?? ''),
     updatedAt: updatedAt ?? prev?.updatedAt ?? new Date().toISOString(),
@@ -38,38 +41,88 @@ export function indexEntry({ date, html, updatedAt, photoCount, published, publi
   });
 }
 
-export function setPublished(date, published, publishedAt) {
-  const e = entries.get(date);
+export function setPublished(id, published, publishedAt) {
+  const e = entries.get(id);
   if (!e) return;
   e.published = !!published;
   e.publishedAt = publishedAt ?? null;
 }
 
-export function getEntry(date) {
-  return entries.get(date) || null;
+export function getEntry(id) {
+  const e = entries.get(id);
+  return e ? { id, ...e } : null;
 }
 
-export function deleteEntry(date) {
-  entries.delete(date);
+export function deleteEntryById(id) {
+  entries.delete(id);
+  comments = comments.filter(c => c.entry_id !== id);
 }
 
 export function getAllEntries({ publishedOnly = false } = {}) {
   return [...entries.entries()]
     .filter(([, e]) => !publishedOnly || e.published)
-    .map(([date, e]) => ({ date, ...e }))
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .map(([id, e]) => ({ id, date: idDate(id), ...e }))
+    .sort((a, b) => b.id.localeCompare(a.id));
+}
+
+export function getEntriesForDate(date, { publishedOnly = false } = {}) {
+  return [...entries.entries()]
+    .filter(([id, e]) => idDate(id) === date && (!publishedOnly || e.published))
+    .map(([id, e]) => ({ id, date: idDate(id), ...e }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function getEntriesForHashtagScan() {
   return [...entries.entries()]
     .filter(([, e]) => e.plain.includes('#'))
-    .map(([date, e]) => ({ date, plain: e.plain }));
+    .map(([id, e]) => ({ id, date: idDate(id), plain: e.plain }));
+}
+
+async function migrateLegacyEntries(entriesDir) {
+  const years = (await fs.readdir(entriesDir, { withFileTypes: true }).catch(() => []))
+    .filter(d => d.isDirectory() && /^\d{4}$/.test(d.name))
+    .map(d => d.name);
+
+  for (const year of years) {
+    const yearDir = path.join(entriesDir, year);
+    const files = await fs.readdir(yearDir).catch(() => []);
+    for (const f of files) {
+      // Legacy format: YYYY-MM-DD.html (no time suffix)
+      const legacy = f.match(/^(\d{4}-\d{2}-\d{2})\.html$/);
+      if (!legacy) continue;
+      const date = legacy[1];
+      const oldHtml = path.join(yearDir, f);
+      const stat = await fs.stat(oldHtml);
+      const t = stat.mtime;
+      const p = (n) => String(n).padStart(2, '0');
+      const time = `${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}`;
+      const newId = `${date}-${time}`;
+
+      let html = await fs.readFile(oldHtml, 'utf8').catch(() => '');
+      html = html.replace(new RegExp(`/photos/${date}/`, 'g'), `/photos/${newId}/`);
+      await fs.writeFile(path.join(yearDir, `${newId}.html`), html, 'utf8');
+      await fs.unlink(oldHtml);
+
+      const rename = async (oldName, newName) => {
+        const oldPath = path.join(yearDir, oldName);
+        if (await fs.access(oldPath).then(() => true).catch(() => false)) {
+          await fs.rename(oldPath, path.join(yearDir, newName));
+        }
+      };
+      await rename(`${date}.meta.json`, `${newId}.meta.json`);
+      await rename(`${date}.comments.json`, `${newId}.comments.json`);
+      await rename(date, newId);
+      console.log(`[journal] Migrated ${date} → ${newId}`);
+    }
+  }
 }
 
 export async function rebuildFromFiles(entriesDir) {
   entries.clear();
   comments = [];
   nextCommentId = 1;
+
+  await migrateLegacyEntries(entriesDir);
 
   const years = (await fs.readdir(entriesDir, { withFileTypes: true }).catch(() => []))
     .filter(d => d.isDirectory() && /^\d{4}$/.test(d.name))
@@ -79,13 +132,13 @@ export async function rebuildFromFiles(entriesDir) {
     const yearDir = path.join(entriesDir, year);
     const files = await fs.readdir(yearDir).catch(() => []);
     for (const f of files) {
-      const entryMatch = f.match(/^(\d{4}-\d{2}-\d{2})\.html$/);
-      const commentMatch = f.match(/^(\d{4}-\d{2}-\d{2})\.comments\.json$/);
+      const entryMatch = f.match(/^(\d{4}-\d{2}-\d{2}-\d{6})\.html$/);
+      const commentMatch = f.match(/^(\d{4}-\d{2}-\d{2}-\d{6})\.comments\.json$/);
       if (entryMatch) {
-        const date = entryMatch[1];
+        const id = entryMatch[1];
         const htmlFile = path.join(yearDir, f);
-        const metaFile = path.join(yearDir, `${date}.meta.json`);
-        const photosDir = path.join(yearDir, date);
+        const metaFile = path.join(yearDir, `${id}.meta.json`);
+        const photosDir = path.join(yearDir, id);
         const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
         const stat = await fs.stat(htmlFile).catch(() => ({ mtime: new Date() }));
         const photoList = await fs.readdir(photosDir).catch(() => []);
@@ -100,7 +153,7 @@ export async function rebuildFromFiles(entriesDir) {
           } catch {}
         }
         indexEntry({
-          date,
+          id,
           html,
           updatedAt: stat.mtime.toISOString(),
           photoCount: photoList.length,
@@ -111,13 +164,12 @@ export async function rebuildFromFiles(entriesDir) {
         const data = await fs.readFile(path.join(yearDir, f), 'utf8').catch(() => '[]');
         try {
           const list = JSON.parse(data);
-          // Preserve original ids from sidecar so parent references survive
           for (const c of list) {
             const id = Number(c.id) || nextCommentId++;
             if (id >= nextCommentId) nextCommentId = id + 1;
             comments.push({
               id,
-              entry_date: commentMatch[1],
+              entry_id: commentMatch[1],
               author: c.author,
               body: c.body,
               created_at: c.created_at,
@@ -136,7 +188,7 @@ export function searchEntries(query, { limit = 200, publishedOnly = false } = {}
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const results = [];
-  for (const [date, e] of entries) {
+  for (const [id, e] of entries) {
     if (publishedOnly && !e.published) continue;
     const plain = e.plain.toLowerCase();
     if (!words.every(w => plain.includes(w))) continue;
@@ -147,33 +199,44 @@ export function searchEntries(query, { limit = 200, publishedOnly = false } = {}
     const match = escapeHtml(e.plain.slice(idx, idx + words[0].length));
     const after = escapeHtml(e.plain.slice(idx + words[0].length, end));
     const snippet = (start > 0 ? '…' : '') + before + `<mark>${match}</mark>` + after + (end < e.plain.length ? '…' : '');
-    results.push({ date, snippet });
+    results.push({ id, date: idDate(id), snippet });
   }
-  results.sort((a, b) => b.date.localeCompare(a.date));
+  results.sort((a, b) => b.id.localeCompare(a.id));
   return results.slice(0, limit);
 }
 
 export function onThisDay(refDate, { publishedOnly = false } = {}) {
   const monthDay = refDate.slice(5);
   return [...entries.entries()]
-    .filter(([date, e]) => date.slice(5) === monthDay && date < refDate && (!publishedOnly || e.published))
+    .filter(([id, e]) => {
+      const d = idDate(id);
+      return d.slice(5) === monthDay && d < refDate && (!publishedOnly || e.published);
+    })
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, e]) => ({ date, html: e.html }));
+    .map(([id, e]) => ({ id, date: idDate(id), html: e.html }));
 }
 
 export function randomEntry({ publishedOnly = false } = {}) {
   const all = [...entries.entries()].filter(([, e]) => e.plain.length > 0 && (!publishedOnly || e.published));
   if (!all.length) return null;
-  const [date, e] = all[Math.floor(Math.random() * all.length)];
-  return { date, html: e.html };
+  const [id, e] = all[Math.floor(Math.random() * all.length)];
+  return { id, date: idDate(id), html: e.html };
 }
 
 export function calendar(year, { publishedOnly = false } = {}) {
   const prefix = String(year);
-  return [...entries.entries()]
-    .filter(([date, e]) => date.startsWith(prefix + '-') && (!publishedOnly || e.published))
-    .map(([date, e]) => ({ date, len: e.plain.length, photo_count: e.photoCount, published: e.published }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = new Map();
+  for (const [id, e] of entries) {
+    if (!idDate(id).startsWith(prefix + '-')) continue;
+    if (publishedOnly && !e.published) continue;
+    const date = idDate(id);
+    const cur = byDate.get(date) || { date, len: 0, photo_count: 0, count: 0 };
+    cur.len += e.plain.length;
+    cur.photo_count += e.photoCount;
+    cur.count += 1;
+    byDate.set(date, cur);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function stats({ publishedOnly = false } = {}) {
@@ -227,17 +290,21 @@ export function stats({ publishedOnly = false } = {}) {
   };
 }
 
-export function listComments(entryDate) {
+export function listComments(entryId) {
   return comments
-    .filter(c => c.entry_date === entryDate)
+    .filter(c => c.entry_id === entryId)
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .map(c => ({ ...c }));
 }
 
-export function addComment({ entryDate, author, body, parentId = null }) {
+export function commentsForEntry(entryId) {
+  return comments.filter(c => c.entry_id === entryId);
+}
+
+export function addComment({ entryId, author, body, parentId = null }) {
   const c = {
     id: nextCommentId++,
-    entry_date: entryDate,
+    entry_id: entryId,
     author,
     body,
     created_at: new Date().toISOString(),

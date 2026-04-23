@@ -124,23 +124,36 @@ function validDate(s) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+function validId(s) {
+  if (!/^\d{4}-\d{2}-\d{2}-\d{6}$/.test(s)) return false;
+  return validDate(s.slice(0, 10));
+}
+
 function safeFilename(name) {
   return /^[A-Za-z0-9._-]+$/.test(name) && !name.includes('..');
 }
 
-function entryPaths(date) {
-  const year = date.slice(0, 4);
+function entryPaths(id) {
+  const year = id.slice(0, 4);
   const dir = path.join(ENTRIES_DIR, year);
   return {
     dir,
-    htmlFile: path.join(dir, `${date}.html`),
-    metaFile: path.join(dir, `${date}.meta.json`),
-    photosDir: path.join(dir, date),
+    htmlFile: path.join(dir, `${id}.html`),
+    metaFile: path.join(dir, `${id}.meta.json`),
+    commentsFile: path.join(dir, `${id}.comments.json`),
+    photosDir: path.join(dir, id),
   };
 }
 
-async function writeMeta(date, { published, publishedAt }) {
-  const { dir, metaFile } = entryPaths(date);
+function newEntryId(forDate) {
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const time = `${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${forDate}-${time}`;
+}
+
+async function writeMeta(id, { published, publishedAt }) {
+  const { dir, metaFile } = entryPaths(id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(metaFile, JSON.stringify({ published: !!published, publishedAt: publishedAt || null }, null, 2), 'utf8');
 }
@@ -149,21 +162,53 @@ function isReader(req) { return req.session.role === 'reader'; }
 
 app.get('/api/entries', requireAuth, (req, res) => {
   const all = dbmod.getAllEntries({ publishedOnly: isReader(req) });
-  res.json(all.map(({ date, updatedAt, published, publishedAt }) => ({
-    date, updatedAt, published, publishedAt,
+  res.json(all.map(({ id, date, updatedAt, published, publishedAt, plain }) => ({
+    id, date, updatedAt, published, publishedAt,
+    wordCount: plain ? (plain.match(/\S+/g) || []).length : 0,
   })));
 });
 
-async function writeCommentsSidecar(date) {
-  const comments = dbmod.listComments(date);
-  const { dir } = entryPaths(date);
-  const sidecar = path.join(dir, `${date}.comments.json`);
+app.get('/api/entries-for-date', requireAuth, (req, res) => {
+  const date = String(req.query.date || '').trim();
+  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+  const list = dbmod.getEntriesForDate(date, { publishedOnly: isReader(req) });
+  res.json(list.map(({ id, updatedAt, published, publishedAt, plain }) => ({
+    id, updatedAt, published, publishedAt,
+    wordCount: plain ? (plain.match(/\S+/g) || []).length : 0,
+  })));
+});
+
+app.post('/api/entries', requireWriter, async (req, res) => {
+  const date = String((req.body || {}).date || '').trim();
+  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+  let id = newEntryId(date);
+  // If collision at same second, append a letter suffix not possible with validId regex.
+  // Loop until unique by bumping seconds artificially.
+  let attempts = 0;
+  while (dbmod.getEntry(id) && attempts < 60) {
+    const [d, t] = [id.slice(0, 10), id.slice(11)];
+    const secs = Number(t.slice(4)) + 1;
+    const bumped = t.slice(0, 4) + String(secs % 60).padStart(2, '0');
+    id = `${d}-${bumped}`;
+    attempts++;
+  }
+  const { dir, htmlFile } = entryPaths(id);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(htmlFile, '', 'utf8');
+  await writeMeta(id, { published: false, publishedAt: null });
+  dbmod.indexEntry({ id, html: '', updatedAt: new Date().toISOString(), photoCount: 0, published: false, publishedAt: null });
+  res.json({ id });
+});
+
+async function writeCommentsSidecar(entryId) {
+  const comments = dbmod.listComments(entryId);
+  const { dir, commentsFile } = entryPaths(entryId);
   if (!comments.length) {
-    await fs.unlink(sidecar).catch(() => {});
+    await fs.unlink(commentsFile).catch(() => {});
     return;
   }
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(sidecar, JSON.stringify(comments, null, 2), 'utf8');
+  await fs.writeFile(commentsFile, JSON.stringify(comments, null, 2), 'utf8');
 }
 
 app.get('/api/search', requireAuth, (req, res) => {
@@ -206,15 +251,23 @@ app.get('/api/stats', requireAuth, (req, res) => {
   res.json(dbmod.stats({ publishedOnly: isReader(req) }));
 });
 
-app.get('/api/comments/:date', requireAuth, (req, res) => {
-  const { date } = req.params;
-  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
-  res.json(dbmod.listComments(date));
+app.get('/api/comments/:entryId', requireAuth, (req, res) => {
+  const { entryId } = req.params;
+  if (!validId(entryId)) return res.status(400).json({ error: 'Invalid entry id' });
+  if (isReader(req)) {
+    const indexed = dbmod.getEntry(entryId);
+    if (!indexed || !indexed.published) return res.status(404).json({ error: 'Not found' });
+  }
+  res.json(dbmod.listComments(entryId));
 });
 
-app.post('/api/comments/:date', requireAuth, async (req, res) => {
-  const { date } = req.params;
-  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+app.post('/api/comments/:entryId', requireAuth, async (req, res) => {
+  const { entryId } = req.params;
+  if (!validId(entryId)) return res.status(400).json({ error: 'Invalid entry id' });
+  if (isReader(req)) {
+    const indexed = dbmod.getEntry(entryId);
+    if (!indexed || !indexed.published) return res.status(404).json({ error: 'Not found' });
+  }
   const body = String((req.body || {}).body || '').trim();
   if (!body) return res.status(400).json({ error: 'Body required' });
   if (body.length > 4000) return res.status(400).json({ error: 'Body too long' });
@@ -223,30 +276,32 @@ app.post('/api/comments/:date', requireAuth, async (req, res) => {
     const pid = Number(req.body.parentId);
     if (!Number.isInteger(pid)) return res.status(400).json({ error: 'Invalid parentId' });
     const parent = dbmod.getComment(pid);
-    if (!parent || parent.entry_date !== date) return res.status(400).json({ error: 'Parent not found' });
+    if (!parent || parent.entry_id !== entryId) return res.status(400).json({ error: 'Parent not found' });
     parentId = pid;
   }
   const author = req.session.nickname || req.session.role;
-  const c = dbmod.addComment({ entryDate: date, author, body, parentId });
-  await writeCommentsSidecar(date);
+  const c = dbmod.addComment({ entryId, author, body, parentId });
+  await writeCommentsSidecar(entryId);
   res.json(c);
 });
 
-app.delete('/api/comments/:id', requireWriter, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
-  const existing = dbmod.getComment(id);
-  dbmod.deleteComment(id);
-  if (existing) await writeCommentsSidecar(existing.entry_date);
+app.delete('/api/comments/:commentId', requireWriter, async (req, res) => {
+  const cid = Number(req.params.commentId);
+  if (!Number.isInteger(cid)) return res.status(400).json({ error: 'Invalid id' });
+  const existing = dbmod.getComment(cid);
+  dbmod.deleteComment(cid);
+  if (existing) await writeCommentsSidecar(existing.entry_id);
   res.json({ ok: true });
 });
 
-app.get('/print', requireAuth, async (_req, res) => {
-  const entries = dbmod.getAllEntries().sort((a, b) => a.date.localeCompare(b.date));
+app.get('/print', requireAuth, async (req, res) => {
+  const entries = dbmod.getAllEntries({ publishedOnly: isReader(req) })
+    .sort((a, b) => a.id.localeCompare(b.id));
   const body = entries.map(e => {
     const d = new Date(e.date + 'T00:00');
     const formatted = d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    return `<article><h2>${formatted}</h2><div class="body ql-editor">${e.html || '<p><em>(empty)</em></p>'}</div></article>`;
+    const time = e.id.slice(11).match(/.{2}/g).slice(0, 2).join(':');
+    return `<article><h2>${formatted} — ${time}</h2><div class="body ql-editor">${e.html || '<p><em>(empty)</em></p>'}</div></article>`;
   }).join('\n');
   res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Journal — Print</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
@@ -262,66 +317,65 @@ app.get('/print', requireAuth, async (_req, res) => {
 <body><button class="print-btn" onclick="window.print()">Print / Save as PDF</button>${body}</body></html>`);
 });
 
-app.get('/api/entries/:date', requireAuth, async (req, res) => {
-  const { date } = req.params;
-  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
-  const indexed = dbmod.getEntry(date);
-  if (isReader(req) && (!indexed || !indexed.published)) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  const { htmlFile, photosDir } = entryPaths(date);
+app.get('/api/entries/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
+  const indexed = dbmod.getEntry(id);
+  if (!indexed) return res.status(404).json({ error: 'Not found' });
+  if (isReader(req) && !indexed.published) return res.status(404).json({ error: 'Not found' });
+  const { htmlFile, photosDir } = entryPaths(id);
   const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
   const photos = (await fs.readdir(photosDir).catch(() => [])).sort();
   res.json({
-    date,
+    id,
+    date: id.slice(0, 10),
     html,
     photos,
-    published: indexed?.published ?? true,
-    publishedAt: indexed?.publishedAt ?? null,
+    published: indexed.published,
+    publishedAt: indexed.publishedAt,
+    updatedAt: indexed.updatedAt,
   });
 });
 
-app.put('/api/entries/:date', requireWriter, async (req, res) => {
-  const { date } = req.params;
-  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+app.put('/api/entries/:id', requireWriter, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
   const { html } = req.body || {};
   if (typeof html !== 'string') return res.status(400).json({ error: 'html required' });
-  const { dir, htmlFile, metaFile, photosDir } = entryPaths(date);
+  const { dir, htmlFile, photosDir } = entryPaths(id);
   await fs.mkdir(dir, { recursive: true });
-
-  const htmlExistedBefore = await fs.access(htmlFile).then(() => true).catch(() => false);
-  const metaExistedBefore = await fs.access(metaFile).then(() => true).catch(() => false);
-
   await fs.writeFile(htmlFile, html, 'utf8');
-
-  // First-time save of a brand-new entry with content → create draft meta.
-  let published, publishedAt;
-  if (!htmlExistedBefore && !metaExistedBefore) {
-    published = false;
-    publishedAt = null;
-    await writeMeta(date, { published, publishedAt });
-  }
 
   const updatedAt = new Date().toISOString();
   const photos = await fs.readdir(photosDir).catch(() => []);
-  const fields = { date, html, updatedAt, photoCount: photos.length };
-  if (published !== undefined) { fields.published = published; fields.publishedAt = publishedAt; }
-  dbmod.indexEntry(fields);
+  dbmod.indexEntry({ id, html, updatedAt, photoCount: photos.length });
 
-  const cur = dbmod.getEntry(date);
+  const cur = dbmod.getEntry(id);
   res.json({ ok: true, updatedAt, published: cur?.published, publishedAt: cur?.publishedAt });
 });
 
-app.post('/api/entries/:date/publish', requireWriter, async (req, res) => {
-  const { date } = req.params;
-  if (!validDate(date)) return res.status(400).json({ error: 'Invalid date' });
+app.delete('/api/entries/:id', requireWriter, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
+  const { htmlFile, metaFile, commentsFile, photosDir } = entryPaths(id);
+  await fs.unlink(htmlFile).catch(() => {});
+  await fs.unlink(metaFile).catch(() => {});
+  await fs.unlink(commentsFile).catch(() => {});
+  await fs.rm(photosDir, { recursive: true, force: true }).catch(() => {});
+  dbmod.deleteEntryById(id);
+  res.json({ ok: true });
+});
+
+app.post('/api/entries/:id/publish', requireWriter, async (req, res) => {
+  const { id } = req.params;
+  if (!validId(id)) return res.status(400).json({ error: 'Invalid id' });
   const published = !!(req.body && req.body.published);
   const publishedAt = published ? new Date().toISOString() : null;
-  const { htmlFile } = entryPaths(date);
+  const { htmlFile } = entryPaths(id);
   const exists = await fs.access(htmlFile).then(() => true).catch(() => false);
   if (!exists) return res.status(404).json({ error: 'Entry does not exist' });
-  await writeMeta(date, { published, publishedAt });
-  dbmod.setPublished(date, published, publishedAt);
+  await writeMeta(id, { published, publishedAt });
+  dbmod.setPublished(id, published, publishedAt);
   res.json({ ok: true, published, publishedAt });
 });
 
@@ -362,53 +416,57 @@ function makeMediaUpload(kind) {
 const upload = makeMediaUpload('image');
 const audioUpload = makeMediaUpload('audio');
 
-async function refreshPhotoCount(date) {
-  const { photosDir, htmlFile } = entryPaths(date);
+async function refreshPhotoCount(id) {
+  const { photosDir, htmlFile } = entryPaths(id);
   const photos = await fs.readdir(photosDir).catch(() => []);
   const html = await fs.readFile(htmlFile, 'utf8').catch(() => '');
   const stat = await fs.stat(htmlFile).catch(() => ({ mtime: new Date() }));
   dbmod.indexEntry({
-    date,
+    id,
     html,
     updatedAt: stat.mtime.toISOString(),
     photoCount: photos.length,
   });
 }
 
-app.post('/api/entries/:date/photos', requireWriter, upload.array('photo', 20), async (req, res) => {
+app.post('/api/entries/:id/photos', requireWriter, upload.array('photo', 20), async (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No file' });
-  await refreshPhotoCount(req.params.date);
+  await refreshPhotoCount(req.params.id);
   res.json({
     files: files.map(f => ({
       filename: f.filename,
-      url: `/photos/${req.params.date}/${f.filename}`,
+      url: `/photos/${req.params.id}/${f.filename}`,
     })),
   });
 });
 
-app.post('/api/entries/:date/audio', requireWriter, audioUpload.single('audio'), async (req, res) => {
+app.post('/api/entries/:id/audio', requireWriter, audioUpload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
-  await refreshPhotoCount(req.params.date);
+  await refreshPhotoCount(req.params.id);
   res.json({
     filename: req.file.filename,
-    url: `/photos/${req.params.date}/${req.file.filename}`,
+    url: `/photos/${req.params.id}/${req.file.filename}`,
   });
 });
 
-app.delete('/api/entries/:date/photos/:filename', requireWriter, async (req, res) => {
-  const { date, filename } = req.params;
-  if (!validDate(date) || !safeFilename(filename)) return res.status(400).json({ error: 'Invalid' });
-  const { photosDir } = entryPaths(date);
+app.delete('/api/entries/:id/photos/:filename', requireWriter, async (req, res) => {
+  const { id, filename } = req.params;
+  if (!validId(id) || !safeFilename(filename)) return res.status(400).json({ error: 'Invalid' });
+  const { photosDir } = entryPaths(id);
   await fs.unlink(path.join(photosDir, filename)).catch(() => {});
-  await refreshPhotoCount(date);
+  await refreshPhotoCount(id);
   res.json({ ok: true });
 });
 
-app.get('/photos/:date/:filename', requireAuth, (req, res) => {
-  const { date, filename } = req.params;
-  if (!validDate(date) || !safeFilename(filename)) return res.status(400).end();
-  const { photosDir } = entryPaths(date);
+app.get('/photos/:id/:filename', requireAuth, (req, res) => {
+  const { id, filename } = req.params;
+  if (!validId(id) || !safeFilename(filename)) return res.status(400).end();
+  if (isReader(req)) {
+    const indexed = dbmod.getEntry(id);
+    if (!indexed || !indexed.published) return res.status(404).end();
+  }
+  const { photosDir } = entryPaths(id);
   res.sendFile(path.join(photosDir, filename), { maxAge: '1d' });
 });
 

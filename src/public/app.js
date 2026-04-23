@@ -239,18 +239,94 @@
 
   // --- Writer ---
   let quill = null;
+  let currentEntryId = null;
   let currentDate = null;
   let saveTimer = null;
   let lastSaved = '';
 
-  async function loadEntry(date) {
+  function formatEntryTime(id) {
+    const t = id.slice(11);
+    const hh = t.slice(0, 2), mm = t.slice(2, 4);
+    const h = Number(hh);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = ((h + 11) % 12) + 1;
+    return `${h12}:${mm} ${ampm}`;
+  }
+
+  function countWords(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    return (tmp.textContent.match(/\S+/g) || []).length;
+  }
+
+  async function selectDate(date) {
     currentDate = date;
     setStatus('');
-    const e = await fetch(`/api/entries/${date}`).then(r => r.json());
+    document.getElementById('entry-editor-wrap').classList.add('hidden');
+    currentEntryId = null;
+    await renderEntryTabs(date);
+    loadOnThisDay(date);
+  }
+
+  async function renderEntryTabs(date) {
+    const tabs = document.getElementById('entry-tabs');
+    const list = await fetch(`/api/entries-for-date?date=${date}`).then(r => r.json()).catch(() => []);
+    tabs.innerHTML = '';
+    if (!list.length) {
+      const p = document.createElement('p');
+      p.className = 'muted';
+      p.textContent = 'No entries yet for this day. Click "＋ New entry" to start writing.';
+      tabs.appendChild(p);
+      return;
+    }
+    for (const e of list) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'entry-tab';
+      btn.dataset.id = e.id;
+      const time = formatEntryTime(e.id);
+      btn.innerHTML = `<strong>${time}</strong> <span class="muted">· ${e.wordCount} word${e.wordCount===1?'':'s'}</span>${e.published ? '' : ' <span class="draft-dot" title="Draft">●</span>'}`;
+      btn.onclick = () => loadEntry(e.id);
+      tabs.appendChild(btn);
+    }
+  }
+
+  async function loadEntry(id) {
+    currentEntryId = id;
+    setStatus('');
+    const e = await fetch(`/api/entries/${id}`).then(r => r.json());
     lastSaved = e.html || '';
     quill.root.innerHTML = lastSaved || '<p><br></p>';
+    document.getElementById('entry-editor-wrap').classList.remove('hidden');
+    document.getElementById('entry-time-label').textContent = formatEntryTime(id);
     updatePublishUI(e.published, e.html);
-    loadOnThisDay(date);
+    updateWordCountUI(e.html);
+    document.querySelectorAll('#entry-tabs .entry-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === id));
+  }
+
+  async function createNewEntry() {
+    if (!currentDate) return;
+    const r = await fetch('/api/entries', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ date: currentDate }),
+    });
+    if (!r.ok) { alert('Could not create entry'); return; }
+    const { id } = await r.json();
+    await renderEntryTabs(currentDate);
+    await loadEntry(id);
+    quill.focus();
+  }
+
+  async function deleteCurrentEntry() {
+    if (!currentEntryId) return;
+    if (!confirm('Delete this entry permanently? Photos and comments will also be removed.')) return;
+    await fetch(`/api/entries/${currentEntryId}`, { method: 'DELETE' });
+    const date = currentDate;
+    currentEntryId = null;
+    document.getElementById('entry-editor-wrap').classList.add('hidden');
+    await renderEntryTabs(date);
   }
 
   function updatePublishUI(published, html) {
@@ -277,21 +353,30 @@
     }
   }
 
+  function updateWordCountUI(html) {
+    const el = document.getElementById('entry-word-count');
+    if (!el) return;
+    const n = countWords(html);
+    el.textContent = `${n} word${n === 1 ? '' : 's'}`;
+  }
+
   function setStatus(text) {
     document.getElementById('save-status').textContent = text;
   }
 
   function scheduleSave() {
-    if (!isWriter || !currentDate) return;
+    if (!isWriter || !currentEntryId) return;
     setStatus('Saving…');
+    updateWordCountUI(quill.root.innerHTML);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, 700);
   }
 
   async function save() {
+    if (!currentEntryId) return;
     const html = quill.root.innerHTML;
     if (html === lastSaved) { setStatus('Saved'); return; }
-    const r = await fetch(`/api/entries/${currentDate}`, {
+    const r = await fetch(`/api/entries/${currentEntryId}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ html }),
@@ -301,6 +386,13 @@
       setStatus('Saved');
       const data = await r.json().catch(() => null);
       if (data) updatePublishUI(data.published, html);
+      // Update the active tab's word count
+      const tab = document.querySelector(`#entry-tabs .entry-tab[data-id="${currentEntryId}"]`);
+      if (tab) {
+        const n = countWords(html);
+        const sp = tab.querySelector('span.muted');
+        if (sp) sp.textContent = `· ${n} word${n === 1 ? '' : 's'}`;
+      }
     }
     else { setStatus('Save failed — try again'); }
   }
@@ -345,7 +437,9 @@
     const picker = document.getElementById('date-picker');
     picker.value = todayStr();
     picker.max = todayStr();
-    picker.addEventListener('change', () => loadEntry(picker.value));
+    picker.addEventListener('change', () => selectDate(picker.value));
+    document.getElementById('new-entry-btn').addEventListener('click', createNewEntry);
+    document.getElementById('delete-entry-btn').addEventListener('click', deleteCurrentEntry);
 
     // Register a custom Audio blot so <audio> tags round-trip through Quill.
     const BlockEmbed = Quill.import('blots/block/embed');
@@ -470,7 +564,7 @@
     photoInput.addEventListener('change', async () => {
       const files = Array.from(photoInput.files || []);
       photoInput.value = '';
-      if (!files.length || !currentDate) return;
+      if (!files.length || !currentEntryId) return;
       let toUpload;
       if (files.length === 1) {
         const picked = await showResizeDialog(files[0]);
@@ -483,7 +577,7 @@
       setStatus(`Uploading ${toUpload.length} photo${toUpload.length > 1 ? 's' : ''}…`);
       const fd = new FormData();
       for (const f of toUpload) fd.append('photo', f);
-      const r = await fetch(`/api/entries/${currentDate}/photos`, { method: 'POST', body: fd });
+      const r = await fetch(`/api/entries/${currentEntryId}/photos`, { method: 'POST', body: fd });
       if (!r.ok) { setStatus('Upload failed'); return; }
       const { files: uploaded } = await r.json();
       const range = quill.getSelection(true) || { index: quill.getLength() };
@@ -499,11 +593,10 @@
     });
 
     document.getElementById('publish-btn').addEventListener('click', async () => {
-      if (!currentDate) return;
-      // Make sure we saved first
+      if (!currentEntryId) return;
       await save();
-      const current = await fetch(`/api/entries/${currentDate}`).then(r => r.json());
-      const r = await fetch(`/api/entries/${currentDate}/publish`, {
+      const current = await fetch(`/api/entries/${currentEntryId}`).then(r => r.json());
+      const r = await fetch(`/api/entries/${currentEntryId}/publish`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ published: !current.published }),
@@ -512,28 +605,19 @@
       const data = await r.json();
       updatePublishUI(data.published, quill.root.innerHTML);
       setStatus(data.published ? 'Published' : 'Unpublished (draft)');
-    });
-
-    document.getElementById('new-section-btn').addEventListener('click', () => {
-      const now = new Date();
-      const time = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-      const html = `<p><br></p><h3>${time}</h3><p><br></p>`;
-      const len = quill.getLength();
-      quill.clipboard.dangerouslyPasteHTML(Math.max(0, len - 1), html, 'user');
-      quill.setSelection(quill.getLength() - 1, 0);
-      quill.focus();
-      scheduleSave();
+      // Refresh tab display to update draft dot
+      renderEntryTabs(currentDate);
     });
 
     const audioInput = document.getElementById('audio-input');
     audioInput.addEventListener('change', async () => {
       const file = audioInput.files[0];
       audioInput.value = '';
-      if (!file || !currentDate) return;
+      if (!file || !currentEntryId) return;
       setStatus(`Uploading audio (${formatBytes(file.size)})…`);
       const fd = new FormData();
       fd.append('audio', file);
-      const r = await fetch(`/api/entries/${currentDate}/audio`, { method: 'POST', body: fd });
+      const r = await fetch(`/api/entries/${currentEntryId}/audio`, { method: 'POST', body: fd });
       if (!r.ok) {
         const msg = r.status === 413 ? 'File too large' : 'Upload failed';
         setStatus(msg);
@@ -548,15 +632,15 @@
     });
 
     window.addEventListener('beforeunload', () => {
-      if (quill && currentDate && quill.root.innerHTML !== lastSaved) {
+      if (quill && currentEntryId && quill.root.innerHTML !== lastSaved) {
         navigator.sendBeacon(
-          `/api/entries/${currentDate}`,
+          `/api/entries/${currentEntryId}`,
           new Blob([JSON.stringify({ html: quill.root.innerHTML })], { type: 'application/json' })
         );
       }
     });
 
-    await loadEntry(todayStr());
+    await selectDate(todayStr());
     showView('write');
   } else {
     showView('read');
@@ -570,9 +654,15 @@
     timeline.innerHTML = '<p class="muted">Loading…</p>';
     const list = await fetch('/api/entries').then(r => r.json());
     allEntries = [];
-    for (const { date } of list) {
-      const e = await fetch(`/api/entries/${date}`).then(r => r.json());
-      allEntries.push({ date, html: e.html || '' });
+    for (const meta of list) {
+      const e = await fetch(`/api/entries/${meta.id}`).then(r => r.json()).catch(() => null);
+      if (e) allEntries.push({
+        id: meta.id,
+        date: meta.date,
+        html: e.html || '',
+        wordCount: meta.wordCount,
+        published: meta.published,
+      });
     }
     await Promise.all([loadTags(), loadStats(), loadCalendar()]);
     renderEntries(allEntries);
@@ -585,37 +675,43 @@
       return;
     }
     timeline.innerHTML = '';
-    for (const { date, html } of entries) {
+    // Oldest-first reads more naturally for reader; keep newest-first for writer
+    const ordered = isWriter ? entries : [...entries].reverse();
+    for (const { id, date, html, wordCount } of ordered) {
       const article = document.createElement('article');
       article.className = 'entry';
-      article.id = `entry-${date}`;
+      article.id = `entry-${id}`;
       const h = document.createElement('h2');
-      h.textContent = formatDate(date);
+      h.textContent = `${formatDate(date)} — ${formatEntryTime(id)}`;
+      const wc = document.createElement('div');
+      wc.className = 'entry-wc muted';
+      wc.textContent = `${wordCount} word${wordCount === 1 ? '' : 's'}`;
       const body = document.createElement('div');
       body.className = 'entry-body ql-editor';
       body.innerHTML = html || '<p class="muted">(empty)</p>';
       article.appendChild(h);
+      article.appendChild(wc);
       article.appendChild(body);
       const comments = document.createElement('div');
       comments.className = 'comments-section';
-      comments.dataset.date = date;
+      comments.dataset.id = id;
       article.appendChild(comments);
       timeline.appendChild(article);
-      renderComments(comments, date);
+      renderComments(comments, id);
     }
   }
 
-  async function renderComments(container, date) {
+  async function renderComments(container, entryId) {
     container.innerHTML = '<h3>Comments</h3>';
-    const list = await fetch(`/api/comments/${date}`).then(r => r.json()).catch(() => []);
+    const list = await fetch(`/api/comments/${entryId}`).then(r => r.json()).catch(() => []);
     const tree = buildTree(list);
     const thread = document.createElement('div');
     thread.className = 'comment-thread';
     for (const node of tree) {
-      thread.appendChild(renderCommentNode(node, date, container));
+      thread.appendChild(renderCommentNode(node, entryId, container));
     }
     container.appendChild(thread);
-    container.appendChild(commentForm(date, container, null, 'Leave a comment…'));
+    container.appendChild(commentForm(entryId, container, null, 'Leave a comment…'));
   }
 
   function buildTree(list) {
@@ -633,20 +729,20 @@
     return roots;
   }
 
-  function renderCommentNode(node, date, container) {
+  function renderCommentNode(node, entryId, container) {
     const wrap = document.createElement('div');
     wrap.className = 'comment-wrap';
-    wrap.appendChild(commentEl(node, date, container));
+    wrap.appendChild(commentEl(node, entryId, container));
     if (node.children.length) {
       const children = document.createElement('div');
       children.className = 'comment-children';
-      for (const child of node.children) children.appendChild(renderCommentNode(child, date, container));
+      for (const child of node.children) children.appendChild(renderCommentNode(child, entryId, container));
       wrap.appendChild(children);
     }
     return wrap;
   }
 
-  function commentEl(c, date, container) {
+  function commentEl(c, entryId, container) {
     const el = document.createElement('div');
     el.className = 'comment' + (c.author === 'writer' ? ' by-writer' : '');
     const when = new Date(c.created_at);
@@ -662,7 +758,7 @@
     reply.onclick = () => {
       const existing = el.querySelector('.comment-form');
       if (existing) { existing.remove(); return; }
-      el.appendChild(commentForm(date, container, c.id, `Reply to ${c.author}…`));
+      el.appendChild(commentForm(entryId, container, c.id, `Reply to ${c.author}…`));
     };
     right.appendChild(reply);
     if (isWriter) {
@@ -672,7 +768,7 @@
       del.onclick = async () => {
         if (!confirm('Delete this comment (and its replies)?')) return;
         await fetch(`/api/comments/${c.id}`, { method: 'DELETE' });
-        renderComments(container, date);
+        renderComments(container, entryId);
       };
       right.appendChild(del);
     }
@@ -686,7 +782,7 @@
     return el;
   }
 
-  function commentForm(date, container, parentId, placeholder) {
+  function commentForm(entryId, container, parentId, placeholder) {
     const form = document.createElement('form');
     form.className = 'comment-form';
     form.innerHTML = `<textarea placeholder="${placeholder}" required></textarea><button type="submit">Post</button>`;
@@ -695,14 +791,14 @@
       const ta = form.querySelector('textarea');
       const body = ta.value.trim();
       if (!body) return;
-      const r = await fetch(`/api/comments/${date}`, {
+      const r = await fetch(`/api/comments/${entryId}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ body, parentId }),
       });
       if (!r.ok) { alert('Failed to post comment'); return; }
       ta.value = '';
-      renderComments(container, date);
+      renderComments(container, entryId);
     };
     return form;
   }
@@ -759,10 +855,15 @@
             cell.classList.add('filled');
             if (hit.len > 200) cell.classList.add('filled-2');
             if (hit.len > 800) cell.classList.add('filled-3');
-            cell.title = `${iso} · ${hit.len} chars` + (hit.photo_count ? ` · ${hit.photo_count} photo${hit.photo_count>1?'s':''}` : '');
+            const countPart = hit.count > 1 ? ` · ${hit.count} entries` : '';
+            cell.title = `${iso}${countPart} · ${hit.len} chars` + (hit.photo_count ? ` · ${hit.photo_count} photo${hit.photo_count>1?'s':''}` : '');
             cell.onclick = () => {
-              const el = document.getElementById(`entry-${iso}`);
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              // Scroll to first entry of that date
+              const match = allEntries.find(e => e.date === iso);
+              if (match) {
+                const el = document.getElementById(`entry-${match.id}`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
             };
           }
           days.appendChild(cell);
@@ -799,8 +900,8 @@
     const q = searchInput.value.trim();
     if (!q) { renderEntries(allEntries); return; }
     const results = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json());
-    const dates = new Set(results.map(r => r.date));
-    renderEntries(allEntries.filter(e => dates.has(e.date)));
+    const ids = new Set(results.map(r => r.id));
+    renderEntries(allEntries.filter(e => ids.has(e.id)));
   }, 250));
 
   tagFilter?.addEventListener('change', () => {
@@ -817,7 +918,7 @@
     const pick = await fetch('/api/random').then(r => r.json());
     if (!pick) { alert('No entries yet.'); return; }
     if (!allEntries.length) await loadTimeline();
-    const el = document.getElementById(`entry-${pick.date}`);
+    const el = document.getElementById(`entry-${pick.id}`);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       el.style.transition = 'background 1s';
@@ -825,4 +926,18 @@
       setTimeout(() => { el.style.background = ''; }, 1500);
     }
   });
+
+  // Reading progress bar
+  function updateProgress() {
+    const readView = document.getElementById('read');
+    if (!readView || readView.classList.contains('hidden')) return;
+    const fill = document.getElementById('progress-fill');
+    if (!fill) return;
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const pct = docHeight > 0 ? Math.min(100, Math.max(0, (scrollTop / docHeight) * 100)) : 0;
+    fill.style.width = pct + '%';
+  }
+  window.addEventListener('scroll', updateProgress, { passive: true });
+  window.addEventListener('resize', updateProgress);
 })();
