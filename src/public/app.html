@@ -43,6 +43,30 @@
     <input type="file" id="photo-input" accept="image/*" multiple hidden>
   </main>
 
+  <dialog id="resize-dialog" class="resize-dialog">
+    <form method="dialog" class="resize-form">
+      <h3>Resize photo before upload</h3>
+      <div class="resize-preview">
+        <img id="resize-preview-img" alt="">
+      </div>
+      <label>Max dimension: <span id="resize-dim-label">2048</span>px
+        <input type="range" id="resize-dim" min="512" max="4096" step="256" value="2048">
+      </label>
+      <label>Quality: <span id="resize-quality-label">85</span>%
+        <input type="range" id="resize-quality" min="50" max="100" step="5" value="85">
+      </label>
+      <div class="resize-info">
+        Original: <span id="resize-original-size">–</span>
+        &nbsp;→&nbsp;
+        New: <span id="resize-output-size">calculating…</span>
+      </div>
+      <div class="resize-actions">
+        <button type="button" id="resize-cancel">Cancel</button>
+        <button type="button" id="resize-upload" class="primary">Upload</button>
+      </div>
+    </form>
+  </dialog>
+
   <main id="read" class="view hidden">
     <div class="read-toolbar">
       <input type="search" id="search" placeholder="Search your entries…" autocomplete="off">

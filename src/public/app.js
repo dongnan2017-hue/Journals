@@ -64,8 +64,24 @@
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   }
 
+  function canResize(file) {
+    return /^image\/(jpeg|jpg|png|webp)$/i.test(file.type);
+  }
+
+  async function renderResizedBlob(img, maxDim, quality) {
+    let { naturalWidth: w, naturalHeight: h } = img;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+      else { w = Math.round(w * maxDim / h); h = maxDim; }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    return new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+  }
+
   async function resizeImage(file, maxDim = 2048, quality = 0.85) {
-    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type)) return file;
+    if (!canResize(file)) return file;
     if (file.size < 800 * 1024) return file;
     try {
       const url = URL.createObjectURL(file);
@@ -75,19 +91,86 @@
         i.onerror = rej;
         i.src = url;
       });
-      let { naturalWidth: w, naturalHeight: h } = img;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-        else { w = Math.round(w * maxDim / h); h = maxDim; }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+      const blob = await renderResizedBlob(img, maxDim, quality);
       URL.revokeObjectURL(url);
       if (!blob || blob.size >= file.size) return file;
       return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
     } catch { return file; }
+  }
+
+  function formatBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  async function showResizeDialog(file) {
+    if (!canResize(file)) return file;
+    const dialog = document.getElementById('resize-dialog');
+    const dimInput = document.getElementById('resize-dim');
+    const qualityInput = document.getElementById('resize-quality');
+    const dimLabel = document.getElementById('resize-dim-label');
+    const qualityLabel = document.getElementById('resize-quality-label');
+    const originalSize = document.getElementById('resize-original-size');
+    const outputSize = document.getElementById('resize-output-size');
+    const previewImg = document.getElementById('resize-preview-img');
+    const cancelBtn = document.getElementById('resize-cancel');
+    const uploadBtn = document.getElementById('resize-upload');
+
+    originalSize.textContent = formatBytes(file.size);
+    outputSize.textContent = 'calculating…';
+
+    const srcUrl = URL.createObjectURL(file);
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = srcUrl;
+    }).catch(() => null);
+    if (!img) { URL.revokeObjectURL(srcUrl); return file; }
+
+    let currentBlob = null;
+    let previewUrl = null;
+
+    async function rerender() {
+      const maxDim = Number(dimInput.value);
+      const q = Number(qualityInput.value) / 100;
+      dimLabel.textContent = maxDim;
+      qualityLabel.textContent = Math.round(q * 100);
+      const blob = await renderResizedBlob(img, maxDim, q);
+      if (!blob) return;
+      currentBlob = blob;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(blob);
+      previewImg.src = previewUrl;
+      outputSize.textContent = formatBytes(blob.size);
+    }
+
+    const debouncedRerender = debounce(rerender, 150);
+    dimInput.oninput = debouncedRerender;
+    qualityInput.oninput = debouncedRerender;
+
+    return new Promise((resolve) => {
+      function cleanup(result) {
+        URL.revokeObjectURL(srcUrl);
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        dimInput.oninput = null;
+        qualityInput.oninput = null;
+        dialog.close();
+        resolve(result);
+      }
+      cancelBtn.onclick = () => cleanup(null);
+      uploadBtn.onclick = () => {
+        if (!currentBlob) return cleanup(file);
+        const renamed = new File(
+          [currentBlob],
+          file.name.replace(/\.[^.]+$/, '') + '.jpg',
+          { type: 'image/jpeg' }
+        );
+        cleanup(renamed);
+      };
+      rerender().then(() => dialog.showModal());
+    });
   }
 
   // --- Writer ---
@@ -207,11 +290,18 @@
       const files = Array.from(photoInput.files || []);
       photoInput.value = '';
       if (!files.length || !currentDate) return;
-      setStatus(`Preparing ${files.length} photo${files.length > 1 ? 's' : ''}…`);
-      const resized = await Promise.all(files.map(f => resizeImage(f)));
-      setStatus(`Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`);
+      let toUpload;
+      if (files.length === 1) {
+        const picked = await showResizeDialog(files[0]);
+        if (!picked) { setStatus(''); return; }
+        toUpload = [picked];
+      } else {
+        setStatus(`Preparing ${files.length} photos…`);
+        toUpload = await Promise.all(files.map(f => resizeImage(f)));
+      }
+      setStatus(`Uploading ${toUpload.length} photo${toUpload.length > 1 ? 's' : ''}…`);
       const fd = new FormData();
-      for (const f of resized) fd.append('photo', f);
+      for (const f of toUpload) fd.append('photo', f);
       const r = await fetch(`/api/entries/${currentDate}/photos`, { method: 'POST', body: fd });
       if (!r.ok) { setStatus('Upload failed'); return; }
       const { files: uploaded } = await r.json();
