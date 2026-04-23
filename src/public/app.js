@@ -328,21 +328,53 @@
       b.classList.toggle('active', b.dataset.id === id));
   }
 
+  let sidebarRecentCache = [];
+  let sidebarActiveTag = null;
+
   async function loadRecentSidebar() {
     if (!isWriter) return;
     const wrap = document.getElementById('recent-entries');
     wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">Loading…</p>';
     const list = await fetch('/api/entries').then(r => r.json()).catch(() => []);
-    if (!list.length) { wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">No entries yet.</p>'; return; }
-    wrap.innerHTML = '';
+    if (!list.length) {
+      sidebarRecentCache = [];
+      wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">No entries yet.</p>';
+      loadSidebarTags();
+      return;
+    }
+    const detailed = [];
     for (const meta of list.slice(0, 25)) {
       const e = await fetch(`/api/entries/${meta.id}`).then(r => r.json()).catch(() => null);
       if (!e) continue;
+      detailed.push({ meta, html: e.html || '' });
+    }
+    sidebarRecentCache = detailed;
+    renderRecentSidebar();
+    loadSidebarTags();
+  }
+
+  function renderRecentSidebar() {
+    const wrap = document.getElementById('recent-entries');
+    wrap.innerHTML = '';
+    const items = sidebarActiveTag
+      ? sidebarRecentCache.filter(({ html }) => {
+          const text = new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
+          return text.toLowerCase().includes(sidebarActiveTag);
+        })
+      : sidebarRecentCache;
+
+    if (!items.length) {
+      wrap.innerHTML = `<p class="muted" style="font-size:0.85rem">No recent entries with ${sidebarActiveTag}.</p>`;
+      return;
+    }
+
+    for (const { meta, html } of items) {
       const item = document.createElement('div');
       item.className = 'recent-item';
       item.dataset.id = meta.id;
+      if (meta.id === currentEntryId) item.classList.add('active');
 
-      const imgMatch = (e.html || '').match(/<img[^>]+src=["']([^"']+)["']/i);
+      const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
       const thumb = document.createElement('div');
       thumb.className = 'recent-thumb';
       if (imgMatch) {
@@ -350,16 +382,12 @@
         img.src = imgMatch[1];
         img.loading = 'lazy';
         thumb.appendChild(img);
-      } else if (/<audio/i.test(e.html || '')) {
-        thumb.textContent = '🎵';
-      } else if (/<iframe/i.test(e.html || '')) {
-        thumb.textContent = '▶';
-      } else {
-        thumb.textContent = '📝';
-      }
+      } else if (/<audio/i.test(html)) thumb.textContent = '🎵';
+      else if (/<iframe/i.test(html)) thumb.textContent = '▶';
+      else thumb.textContent = '📝';
 
       const bodyTmp = document.createElement('div');
-      bodyTmp.innerHTML = e.html || '';
+      bodyTmp.innerHTML = html;
       const text = (bodyTmp.textContent || '').trim();
       const snippet = text.length > 100 ? text.slice(0, 100) + '…' : (text || '(empty)');
 
@@ -379,6 +407,35 @@
         await loadEntry(meta.id);
       };
       wrap.appendChild(item);
+    }
+  }
+
+  async function loadSidebarTags() {
+    const wrap = document.getElementById('sidebar-tags');
+    if (!wrap) return;
+    const tags = await fetch('/api/tags').then(r => r.json()).catch(() => []);
+    wrap.innerHTML = '';
+    if (!tags.length) {
+      wrap.innerHTML = '<p class="muted" style="font-size:0.85rem">Type #tags in entries to filter by them here.</p>';
+      return;
+    }
+    const allPill = document.createElement('button');
+    allPill.type = 'button';
+    allPill.className = 'tag-pill' + (sidebarActiveTag === null ? ' active' : '');
+    allPill.textContent = 'All';
+    allPill.onclick = () => { sidebarActiveTag = null; renderRecentSidebar(); loadSidebarTags(); };
+    wrap.appendChild(allPill);
+    for (const { tag, count } of tags) {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'tag-pill' + (sidebarActiveTag === tag ? ' active' : '');
+      pill.textContent = `${tag} · ${count}`;
+      pill.onclick = () => {
+        sidebarActiveTag = sidebarActiveTag === tag ? null : tag;
+        renderRecentSidebar();
+        loadSidebarTags();
+      };
+      wrap.appendChild(pill);
     }
   }
 

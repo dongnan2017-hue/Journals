@@ -252,6 +252,25 @@ header button:hover, header a:hover { background: var(--bg-soft); }
 }
 .recent-draft { color: #d39e00; font-weight: 600; }
 
+.sidebar-section { margin-top: 1.25rem !important; }
+#sidebar-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.tag-pill {
+  font: inherit; font-size: 0.78rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--fg);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tag-pill:hover { background: var(--bg-soft); border-color: var(--accent); }
+.tag-pill.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 @media (max-width: 900px) {
   .write-layout { grid-template-columns: 1fr; }
   .write-sidebar { position: static; max-height: 320px; }
