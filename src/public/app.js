@@ -2,6 +2,7 @@
   let me = await fetch('/api/me').then(r => r.json());
   if (!me.role) { location.href = '/login'; return; }
   const isWriter = me.role === 'writer';
+  const NICK_KEY = `journal-nickname-${me.role}`;
 
   const roleLabelEl = document.getElementById('role-label');
   const nicknameBtn = document.getElementById('nickname-btn');
@@ -9,6 +10,21 @@
   function renderMe() {
     roleLabelEl.textContent = isWriter ? 'Writing' : 'Reading';
     nicknameBtn.textContent = me.nickname ? `as ${me.nickname}` : 'Set your name';
+  }
+
+  // Restore nickname from localStorage if the session doesn't have one yet.
+  if (!me.nickname) {
+    const saved = localStorage.getItem(NICK_KEY);
+    if (saved) {
+      try {
+        const r = await fetch('/api/me', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ nickname: saved }),
+        });
+        if (r.ok) me = await r.json();
+      } catch {}
+    }
   }
   renderMe();
 
@@ -22,6 +38,8 @@
     });
     if (!r.ok) { alert('Could not save name'); return; }
     me = await r.json();
+    if (me.nickname) localStorage.setItem(NICK_KEY, me.nickname);
+    else localStorage.removeItem(NICK_KEY);
     renderMe();
   });
 
